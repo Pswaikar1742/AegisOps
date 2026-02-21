@@ -1,5 +1,11 @@
 # 🛡️ AegisOps — Autonomous AI SRE Command Center
 
+[![GitHub repo](https://img.shields.io/badge/GitHub-Pswaikar1742%2FAegisOps-blue?logo=github)](https://github.com/Pswaikar1742/AegisOps)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://github.com/Pswaikar1742/AegisOps/blob/main/docker-compose.yml)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi)](https://github.com/Pswaikar1742/AegisOps/tree/main/aegis_core)
+[![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB?logo=react)](https://github.com/Pswaikar1742/AegisOps/tree/main/aegis_cockpit)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/Pswaikar1742/AegisOps/blob/main/LICENSE)
+
 > **God Mode Activated.** An autonomous, multi-agent AI system that detects, diagnoses, and remediates cloud infrastructure incidents in real-time — with a stunning NASA-style cockpit UI.
 
 ---
@@ -130,21 +136,22 @@ docker compose >= 2.0
 node >= 18 (for local dev only)
 python >= 3.11 (for local dev only)
 
-# Required for AI (primary)
-ollama pull llama3.1:8b-instruct-q4_K_M
+# Required for AI (primary LLM via FastRouter)
+# Get a free API key at https://fastrouter.ai
+export FASTRTR_API_KEY=your_key_here
 
-# Optional (fallback AI)
-export ANTHROPIC_API_KEY=your_key_here
+# Optional: local Ollama fallback
+# ollama pull llama3.2:latest
 ```
 
 ### Quick Start
 ```bash
-git clone https://github.com/your-org/AegisOps.git
+git clone https://github.com/Pswaikar1742/AegisOps.git
 cd AegisOps
 
 # Copy env template
 cp aegis_core/.env.example aegis_core/.env
-# Edit .env — add ANTHROPIC_API_KEY if you have one
+# Edit aegis_core/.env — set FASTRTR_API_KEY (required)
 
 # Start all services
 docker compose up -d
@@ -361,15 +368,30 @@ AegisOps/
 │   └── nginx.conf
 │
 ├── aegis_dashboard/             # Streamlit legacy dashboard
-├── aegis_infra/                 # Infrastructure configs
+├── aegis_infra/                 # Infrastructure configs (buggy app target)
 ├── scripts/
+│   ├── README.md                # Scripts documentation
 │   ├── demo-setup.sh            # Opens all 3 screens
+│   ├── demo-quickstart.sh       # Quick reference card
 │   ├── trigger-demo-incident.sh # Single incident trigger
-│   └── trigger-all-incidents.sh # All 5 incidents cascade
+│   ├── trigger-all-incidents.sh # All 5 incidents cascade
+│   ├── DEMO.sh                  # One-command demo launcher
+│   ├── DEMO_READY.sh            # Demo readiness checklist
+│   └── test-visual-enhancements.sh  # Visual test suite
 ├── docs/
-│   ├── repo-overview.md         # Full technical inventory
-│   └── DEMO.md                  # Demo walkthrough guide
-└── docker-compose.yml           # Full stack orchestration
+│   ├── overview.md              # What is AegisOps?
+│   ├── architecture.md          # Deep technical dive
+│   ├── api-reference.md         # All REST + WebSocket endpoints
+│   ├── getting-started.md       # Step-by-step setup & workflows
+│   ├── llm-strategy.md          # RAG engine + LLM providers
+│   ├── prerequisites.md         # Hardware, software, API keys
+│   ├── problem.md               # The SRE problem + business case
+│   ├── repo-overview.md         # Full technical inventory + QA checklist
+│   ├── LOCAL_DEV.md             # Local dev without Docker rebuilds
+│   ├── Demo.pdf                 # Demo presentation
+│   └── archive/                 # Historical/hackathon reference docs
+├── docker-compose.yml           # Full stack orchestration
+└── docker-compose.demo.yml      # Demo-specific compose override
 ```
 
 ---
@@ -377,16 +399,20 @@ AegisOps/
 ## 🔧 Environment Variables
 
 ```bash
-# aegis_core/.env
-OLLAMA_BASE_URL=http://host.docker.internal:11434/v1
-OLLAMA_MODEL=llama3.1:8b-instruct-q4_K_M
-ANTHROPIC_API_KEY=your_key_here          # fallback only
+# aegis_core/.env  (copy from aegis_core/.env.example)
+FASTRTR_API_KEY=your_fastrouter_key_here   # primary LLM via FastRouter
+FASTRTR_BASE_URL=https://go.fastrouter.ai/api/v1
+FASTRTR_MODEL=anthropic/claude-sonnet-4-20250514
+
+# Optional: local Ollama fallback
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3.2:latest
+
 TARGET_CONTAINER=buggy-app-v2
 HEALTH_URL=http://buggy-app-v2:8000/health
-RUNBOOK_PATH=/app/data/runbook.json
 SLACK_WEBHOOK_URL=                        # optional
-AUTO_REMEDIATION=true
-CONFIDENCE_THRESHOLD=0.6
+VERIFY_RETRIES=3
+VERIFY_DELAY_SECS=5
 ```
 
 ---
@@ -418,12 +444,16 @@ CONFIDENCE_THRESHOLD=0.6
 
 ---
 
-## 🤝 Team
+## 🤝 Contributing
 
-Built in **7 hours** at hackathon with:
-- Backend: FastAPI + Ollama + Docker SDK
+See [docs/getting-started.md](docs/getting-started.md) for setup instructions and [docs/architecture.md](docs/architecture.md) for a deep technical overview.
+
+**Repository:** https://github.com/Pswaikar1742/AegisOps
+
+**Tech Stack:**
+- Backend: FastAPI + Docker SDK + scikit-learn RAG
 - Frontend: React + Vite + Tailwind + Recharts
-- AI: llama3.1:8b (local) + Claude (fallback)
+- AI: FastRouter (Claude Sonnet) + Ollama local fallback
 - Infra: Docker Compose + Nginx
 
 ---
