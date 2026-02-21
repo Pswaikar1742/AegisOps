@@ -33,18 +33,40 @@ const MetricBar = ({ label, value, unit = '%', max = 100 }) => {
 };
 
 // ── ReplicaNodes ───────────────────────────────────────────
-const ReplicaNodes = ({ count }) => (
-  <div className="flex space-x-2 flex-wrap gap-y-2">
-    {Array.from({ length: 5 }).map((_, i) => (
-      <div key={i}
-        className={`h-9 w-9 rounded flex items-center justify-center border text-[10px] font-mono transition-all duration-700 ${
-          i < count
-            ? 'bg-emerald-950 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.4)] scale-100'
-            : 'bg-slate-900 border-slate-800 text-slate-700 scale-90 opacity-40'
-        }`}>
-        R{i + 1}
-      </div>
-    ))}
+const ReplicaNodes = ({ count, confirmed }) => (
+  <div className="flex space-x-2 flex-wrap gap-y-2 items-center">
+    {Array.from({ length: 5 }).map((_, i) => {
+      const active = i < count;
+      const confirmedActive = i < confirmed;
+      const pending = active && !confirmedActive;
+      return (
+        <div key={i} className="relative group">
+          <div
+            role="img"
+            aria-label={`Replica ${i + 1} ${active ? 'active' : 'available'}`}
+            title={`Replica R${i + 1} — ${active ? (pending ? 'Pending start' : 'Active replica') : 'Available slot'}`}
+            className={`h-9 w-9 rounded flex items-center justify-center border text-[10px] font-mono transition-all duration-700 ${
+              active
+                ? pending
+                  ? 'bg-amber-900 border-amber-500 text-amber-300 shadow-[0_0_10px_rgba(250,204,21,0.25)] scale-100'
+                  : 'bg-emerald-950 border-emerald-500 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.4)] scale-100'
+                : 'bg-slate-900 border-slate-800 text-slate-700 scale-90 opacity-40'
+            }`}
+          >
+            R{i + 1}
+            {pending && <span className="ml-1 text-[10px] animate-pulse">⏳</span>}
+          </div>
+
+          {/* visual tooltip on hover */}
+          <div className="pointer-events-none absolute -top-10 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <div className="bg-slate-800 text-slate-200 text-[11px] px-2 py-1 rounded shadow-md border border-slate-700 whitespace-nowrap">
+              <strong className="text-[11px]">R{i + 1}</strong>
+              <span className="ml-2 text-slate-400 text-[10px]">— {pending ? 'Pending start' : (active ? 'Active replica (serving traffic)' : 'Available replica slot')}</span>
+            </div>
+          </div>
+        </div>
+      );
+    })}
   </div>
 );
 
@@ -116,12 +138,15 @@ export default function DashboardCockpit() {
   // ── State ──────────────────────────────────────────────────
   const [metrics, setMetrics]           = useState({ cpu: 12, memory: 45, db: 20, net: 8 });
   const [replicaCount, setReplicaCount] = useState(1);
+  const [confirmedReplicaCount, setConfirmedReplicaCount] = useState(1); // last confirmed by backend
   const [councilStatus, setCouncilStatus] = useState({ sre: 'idle', security: 'idle', auditor: 'idle' });
   const [aiText, setAiText]             = useState('');
   const [aiStatus, setAiStatus]         = useState('idle'); // idle | streaming | complete
   const [logs, setLogs]                 = useState([]);
   const [decision, setDecision]         = useState(null);
   const simTimers                       = useRef([]);
+  const pendingScaleTimer = useRef(null);
+  const pendingScaleTarget = useRef(null);
 
   // ── Helpers ────────────────────────────────────────────────
   const ts = () => new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -191,7 +216,10 @@ export default function DashboardCockpit() {
         const rc = f.data?.event?.replica_count || f.data?.replica_count;
         if (rc) {
           setReplicaCount(rc);
-          addLog(`📈 SCALED to ${rc} replicas`, 'action');
+          setConfirmedReplicaCount(rc);
+          // clear any pending optimistic state
+          if (pendingScaleTimer.current) { clearTimeout(pendingScaleTimer.current); pendingScaleTimer.current = null; pendingScaleTarget.current = null; }
+          addLog(`📈 SCALED to ${rc} replicas (confirmed)`, 'action');
         }
         break;
       }
@@ -299,6 +327,54 @@ export default function DashboardCockpit() {
     });
   }, [addLog]);
 
+  // ── Scale handlers (UI hooks into backend + optimistic update) ───
+  const handleScaleUp = async (count = 1) => {
+    const prev = replicaCount;
+    const next = Math.min(5, prev + count);
+    setReplicaCount(next);
+    // mark pending target until confirmed
+    pendingScaleTarget.current = next;
+    if (pendingScaleTimer.current) clearTimeout(pendingScaleTimer.current);
+    pendingScaleTimer.current = setTimeout(() => {
+      // revert optimistic UI if no confirmation
+      setReplicaCount(confirmedReplicaCount);
+      pendingScaleTarget.current = null;
+      pendingScaleTimer.current = null;
+      addLog('⚠️ Scale confirmation timeout — reverting UI', 'alert');
+    }, 12000);
+    addLog(`🔧 UI: scaling up to ${next} replicas (optimistic)`, 'action');
+    try {
+      await triggerScale('up', count);
+      addLog(`📈 Scale request successful (+${count})`, 'action');
+    } catch (err) {
+      setReplicaCount(prev);
+      addLog(`⚠️ Scale up failed: ${err?.message || err}`, 'alert');
+    }
+  };
+
+  const handleScaleDown = async (count = 1) => {
+    const prev = replicaCount;
+    const next = Math.max(1, prev - count);
+    setReplicaCount(next);
+    // mark pending target until confirmed
+    pendingScaleTarget.current = next;
+    if (pendingScaleTimer.current) clearTimeout(pendingScaleTimer.current);
+    pendingScaleTimer.current = setTimeout(() => {
+      setReplicaCount(confirmedReplicaCount);
+      pendingScaleTarget.current = null;
+      pendingScaleTimer.current = null;
+      addLog('⚠️ Scale confirmation timeout — reverting UI', 'alert');
+    }, 12000);
+    addLog(`🔧 UI: scaling down to ${next} replicas (optimistic)`, 'action');
+    try {
+      await triggerScale('down', count);
+      addLog(`📉 Scale request successful (-${count})`, 'action');
+    } catch (err) {
+      setReplicaCount(prev);
+      addLog(`⚠️ Scale down failed: ${err?.message || err}`, 'alert');
+    }
+  };
+
   const INJECT_BUTTONS = [
     { type: 'memory_oom',     label: 'OOM Kill',    icon: '💀', color: 'red' },
     { type: 'cpu_spike',      label: 'CPU Spike',   icon: '🔥', color: 'red' },
@@ -384,6 +460,26 @@ export default function DashboardCockpit() {
                   <span className={replicaCount > 1 ? 'text-emerald-400 font-bold' : 'text-slate-600'}>{replicaCount}/5</span>
                 </div>
                 <ReplicaNodes count={replicaCount} />
+
+                <div className="mt-3 flex items-center gap-2">
+                  <button onClick={() => handleScaleUp(1)}
+                    className="px-2 py-1 bg-emerald-800/20 border border-emerald-700 text-emerald-300 text-[11px] rounded hover:bg-emerald-800/40">
+                    +1
+                  </button>
+                  <button onClick={() => handleScaleUp(2)}
+                    className="px-2 py-1 bg-emerald-800/10 border border-emerald-700 text-emerald-300 text-[11px] rounded hover:bg-emerald-800/30">
+                    +2
+                  </button>
+                  <button onClick={() => handleScaleDown(1)}
+                    className="px-2 py-1 bg-slate-900 border border-slate-700 text-slate-400 text-[11px] rounded hover:bg-slate-800">
+                    -1
+                  </button>
+                  <button onClick={() => handleScaleDown(2)}
+                    className="px-2 py-1 bg-slate-900 border border-slate-700 text-slate-400 text-[11px] rounded hover:bg-slate-800">
+                    -2
+                  </button>
+                  <span className="ml-auto text-[11px] text-slate-500">Slots: 5</span>
+                </div>
               </div>
             </div>
 
