@@ -179,7 +179,7 @@ export default function LandingPage() {
 
                     {/* CTA Button */}
                     <button
-                        onClick={() => navigate('/login')}
+                        onClick={() => navigate('/dashboard')}
                         className="btn-glow group relative inline-flex items-center gap-3 px-8 py-4 bg-aegis-accent/10 border border-aegis-accent/50 rounded-xl text-aegis-accent font-bold font-mono text-sm tracking-[0.2em] uppercase cursor-pointer"
                         id="cta-initialize"
                     >
