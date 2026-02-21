@@ -1,574 +1,485 @@
-# Getting Started & Quick Start Guide
+# Getting Started — AegisOps GOD MODE v2.0
 
-## 5-Minute Quick Start
+## Quick Start (5 Minutes)
 
 ### Prerequisites
-- Docker Desktop installed and running
-- `.env` file with API keys (see Prerequisites)
+- Docker Desktop (v20.10+) installed and running
+- `FASTRTR_API_KEY` from FastRouter ([get one here](https://fastrouter.ai))
 
-### Step 1: Clone & Setup (1 min)
+### 1. Clone and Configure
 
 ```bash
 cd AegisOps
-cp .env.example .env  # or create .env with your keys
+
+# Create the environment file
+cp aegis_core/.env.example aegis_core/.env
 ```
 
-**Required in `.env`:**
+Edit `aegis_core/.env` and set:
 ```env
-GEMINI_API_KEY=your_key_here
-SLACK_BOT_TOKEN=xoxb-your-token  # optional but recommended
+FASTRTR_API_KEY=your_key_here
+SLACK_WEBHOOK_URL=https://hooks.slack.com/...   # optional
 ```
 
-### Step 2: Start All Services (2 min)
+### 2. Start All Services
 
 ```bash
 docker-compose up --build
 ```
 
-**Wait for output:**
+Wait for all services to be healthy:
 ```
-aegis-agent    | ✅ AegisOps Agent Core starting…
-buggy-app-v2   | Running on http://0.0.0.0:8000
-aegis-dashboard| You can now view your Streamlit app in your browser.
+aegis-lb        | nginx started
+buggy-app-v2    | Running on http://0.0.0.0:8000
+aegis-agent     | 🛡️  AegisOps GOD MODE starting…
+aegis-cockpit   | nginx started (serving React on :3000)
+aegis-dashboard | You can now view your Streamlit app in your browser.
 ```
 
-### Step 3: Access Services (1 min)
+### 3. Access the Services
 
-- 🎨 **Dashboard**: http://localhost:8501
-- 🤖 **API Docs**: http://localhost:8001/docs
-- 🏗️ **Buggy App**: http://localhost:8000/health
+| Service | URL | Description |
+|---------|-----|-------------|
+| **SRE Cockpit** | http://localhost:3000 | Primary React UI with real-time WebSocket |
+| **Core API Docs** | http://localhost:8001/docs | Interactive Swagger UI |
+| **Buggy App** | http://localhost:8000/health | Target app health |
+| **Load Balancer** | http://localhost:80/health | Nginx LB (proxies to buggy app) |
+| **Legacy Dashboard** | http://localhost:8501 | Streamlit UI (backwards compat) |
 
-### Step 4: Trigger an Incident (1 min)
+### 4. Trigger Your First Incident
 
 ```bash
-# Terminal 2 - while services are running
+# Trigger a memory leak
 curl http://localhost:8000/trigger_memory
-curl http://localhost:8000/trigger_memory  # Call again to increase pressure
 ```
 
-**Watch:**
-1. Memory increases
-2. AegisOps detects threshold breach
-3. Sends webhook to Core API
-4. AI analyzes and recommends RESTART
-5. Container restarts
-6. Health verified
-7. Dashboard shows RESOLVED status
+**Watch in the SRE Cockpit (http://localhost:3000):**
+1. 📨 Incident received — timeline panel appears
+2. 📚 RAG retrieval — "Found N similar past incidents" (or cold start)
+3. 🧠 AI stream — reasoning tokens appear typewriter-style
+4. 🏛️ Council votes — three agents vote in sequence
+5. ⚡ Action executed — container restarted / replicas spawned
+6. 🩺 Health verified — `/health` passes
+7. ✅ RESOLVED — runbook updated
 
 ---
 
-## Detailed Getting Started
+## Detailed Setup
 
-### Understanding the 3 Services
+### Environment File
 
-| Service | Port | Purpose | Status |
-|---------|------|---------|--------|
-| **Dashboard** | 8501 | Real-time UI | 🎨 Browse & visualize |
-| **AegisOps Core** | 8001 | Brain (AI + Orchestration) | 🧠 Receives incidents |
-| **Buggy App** | 8000 | Target / Victim | 🏗️ Simulates issues |
+The environment file must be at `aegis_core/.env` (not the project root).
 
-### Checking Service Health
+**All available settings:**
+```env
+# ── LLM Primary (required) ─────────────────────────────────────────
+FASTRTR_API_KEY=your_key_here
+FASTRTR_BASE_URL=https://go.fastrouter.ai/api/v1
+FASTRTR_MODEL=anthropic/claude-sonnet-4-20250514
+
+# ── LLM Fallback (optional, runs locally) ──────────────────────────
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3.2:latest
+
+# ── Slack Notifications (optional) ─────────────────────────────────
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...
+
+# ── Tuning (all have safe defaults) ────────────────────────────────
+LOG_TRUNCATE_CHARS=2000
+VERIFY_RETRIES=3
+VERIFY_DELAY_SECS=5
+HEALTH_TIMEOUT_SECS=5
+MAX_REPLICAS=5
+METRICS_INTERVAL_SECS=3
+```
+
+### Without an API Key (Ollama-only mode)
+
+If you don't have a FastRouter key, you can run in Ollama-only mode:
 
 ```bash
-# Check all are running
-docker-compose ps
+# Pull a model first (run once)
+docker run --rm -v ollama:/root/.ollama ollama/ollama pull llama3.2
 
-# Check logs for errors
-docker-compose logs -f
-
-# Check specific service
-docker-compose logs aegis-agent -f
-docker-compose logs buggy-app-v2 -f
-docker-compose logs aegis-dashboard -f
+# In aegis_core/.env:
+FASTRTR_API_KEY=          # leave empty
+OLLAMA_BASE_URL=http://ollama:11434/v1
+OLLAMA_MODEL=llama3.2:latest
 ```
+
+Then start Ollama as a Docker service by adding to `docker-compose.yml`:
+```yaml
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - aegis-network
+    restart: unless-stopped
+```
+
+Note: Ollama on CPU is ~3–10× slower than FastRouter. For faster results, use a machine with a GPU.
 
 ---
 
 ## Testing Workflows
 
-### Workflow A: Memory Leak Simulation
-
-**Objective:** Simulate a memory leak and watch AegisOps fix it
+### Workflow A: Memory Leak (Automatic Detection)
 
 ```bash
 # Terminal 1: Watch logs
 docker-compose logs aegis-agent -f
 
-# Terminal 2: Trigger incident
+# Terminal 2: Gradually increase memory pressure
 curl http://localhost:8000/trigger_memory
-sleep 1
-curl http://localhost:8000/trigger_memory  # Repeat to increase pressure
-sleep 1
+sleep 2
 curl http://localhost:8000/trigger_memory
+sleep 2
+curl http://localhost:8000/trigger_memory
+# Repeat until daemon detects > 85% memory and fires the webhook
 ```
 
-**What You'll See:**
-1. Logs show memory growing
-2. Memory monitor daemon detects >85%
-3. Webhook sent to AegisOps Core
-4. AI Brain analyzes: "Memory leak → RESTART"
-5. Docker restarts container
-6. Health check passes
-7. Incident marked RESOLVED
-8. Runbook updated
-9. Slack notification (if configured)
-
-**Terminal 3 (optional): Check Dashboard**
-```bash
-open http://localhost:8501
-```
+**Expected sequence:**
+1. Background daemon detects `psutil.virtual_memory().percent > 85`
+2. Daemon sends webhook: `POST http://aegis-agent:8001/webhook`
+3. AegisOps logs: `📨 Webhook: <id> (Memory Leak)`
+4. RAG retrieves (or cold starts)
+5. AI analyses → recommends RESTART
+6. Council: 3/3 APPROVED
+7. Container restarts
+8. Health check passes
+9. `✅ GOD MODE: Incident <id> RESOLVED`
 
 ---
 
-### Workflow B: CPU Spike Simulation
-
-```bash
-# Terminal 1: Logs
-docker-compose logs aegis-agent -f
-
-# Terminal 2: Trigger
-curl http://localhost:8000/trigger_cpu
-```
-
-**Expected Behavior:**
-- Similar to memory leak
-- AI recognizes CPU spike pattern
-- Recommends RESTART or SCALE_UP
-- Container restarts
-- CPU usage returns to normal
-
----
-
-### Workflow C: Database Latency
-
-```bash
-# Terminal 1: Logs
-docker-compose logs aegis-agent -f
-
-# Terminal 2: Trigger
-curl http://localhost:8000/trigger_db_latency
-```
-
-**Expected:**
-- 5-second sleep simulates slow query
-- API hangs
-- AegisOps may trigger after repeated failures
-- Restart clears the state
-
----
-
-## API Testing
-
-### Test 1: Direct Webhook Call
+### Workflow B: Manual Webhook (Direct API)
 
 ```bash
 curl -X POST http://localhost:8001/webhook \
   -H "Content-Type: application/json" \
   -d '{
-    "incident_id": "test-001",
-    "container_name": "buggy-app-v2",
+    "incident_id": "manual-001",
     "alert_type": "Memory Leak",
     "severity": "CRITICAL",
-    "logs": "ERROR: Memory usage at 98%",
-    "timestamp": "2024-02-21T03:15:00Z"
+    "logs": "ERROR: Memory usage at 98%. Heap growing unbounded. OOM imminent.",
+    "container_name": "buggy-app-v2"
   }'
 ```
 
-**Response (immediate):**
-```json
-{
-  "incident_id": "test-001",
-  "container_name": "buggy-app-v2",
-  "status": "RECEIVED",
-  "analysis": null,
-  "error": null
-}
-```
-
-**Then (after 3-5 seconds):**
+Poll for status:
 ```bash
-curl http://localhost:8001/incidents/test-001
-```
-
-**Response:**
-```json
-{
-  "incident_id": "test-001",
-  "status": "RESOLVED",
-  "analysis": {
-    "root_cause": "Memory leak",
-    "action": "RESTART",
-    "justification": "Container restart will release memory"
-  }
-}
+# Poll every 2 seconds for up to 30 seconds
+for i in {1..15}; do
+  STATUS=$(curl -s http://localhost:8001/incidents/manual-001 | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+  echo "Status: $STATUS"
+  [ "$STATUS" = "RESOLVED" ] || [ "$STATUS" = "FAILED" ] && break
+  sleep 2
+done
 ```
 
 ---
 
-### Test 2: List All Incidents
+### Workflow C: CPU Spike
 
 ```bash
+curl http://localhost:8000/trigger_cpu
+```
+
+**Expected:** AI recommends `SCALE_UP` (CPU spikes → more replicas to distribute load).  
+Watch topology panel in Cockpit — new replica nodes should appear after council approval.
+
+---
+
+### Workflow D: Manual Scaling
+
+```bash
+# Scale up to 2 replicas
+curl -X POST "http://localhost:8001/scale/up?count=2"
+
+# View topology
+curl http://localhost:8001/topology | python3 -m json.tool
+
+# Check Nginx is updated
+docker exec aegis-lb cat /etc/nginx/conf.d/upstream.conf
+
+# Scale back down
+curl -X POST http://localhost:8001/scale/down
+```
+
+---
+
+### Workflow E: RAG Knowledge Base
+
+After at least one incident has been resolved:
+
+```bash
+# View the runbook (RAG corpus)
+curl http://localhost:8001/runbook | python3 -m json.tool
+
+# Test retrieval with similar logs
+curl "http://localhost:8001/rag/test?logs=memory+usage+growing+heap+leak"
+```
+
+---
+
+### Workflow F: WebSocket Stream (CLI)
+
+```bash
+# Install websocat (brew install websocat / apt install websocat)
+websocat ws://localhost:8001/ws
+
+# Type: ping
+# Server responds: {"type": "heartbeat", "data": {"status": "alive"}, ...}
+
+# Then trigger an incident in another terminal and watch all frames arrive
+```
+
+---
+
+## API Reference Quick Commands
+
+```bash
+# Health
+curl http://localhost:8001/health
+
+# Send incident
+curl -X POST http://localhost:8001/webhook -H "Content-Type: application/json" -d '{...}'
+
+# List all incidents
 curl http://localhost:8001/incidents
+
+# Get specific incident
+curl http://localhost:8001/incidents/{incident_id}
+
+# Live metrics
+curl http://localhost:8001/metrics | python3 -m json.tool
+
+# List containers
+curl http://localhost:8001/containers
+
+# Service topology
+curl http://localhost:8001/topology | python3 -m json.tool
+
+# Runbook (RAG corpus)
+curl http://localhost:8001/runbook | python3 -m json.tool
+
+# Test RAG retrieval
+curl "http://localhost:8001/rag/test?logs=cpu+spike+infinite+loop"
+
+# Manual scale up (3 replicas)
+curl -X POST "http://localhost:8001/scale/up?count=3"
+
+# Manual scale down
+curl -X POST http://localhost:8001/scale/down
 ```
 
 ---
 
-### Test 3: Swagger UI Exploration
-
-Open http://localhost:8001/docs in browser and click "Try it out" on endpoints
-
----
-
-## Dashboard Exploration
-
-### Sections
-
-1. **Top Metrics**
-   - Global CPU Usage
-   - Global Memory Usage
-   - System Health Status
-
-2. **Incident Lifecycle**
-   - Stages: Nominal → Anomaly → AI Brain → Action → Verification
-   - Auto-progresses every 2-5 seconds
-   - Displays raw incident JSON
-
-3. **Sidebar - Runbook**
-   - Shows learned solutions
-   - Issues and fixes
-   - Timestamps
-
-4. **Sidebar - Business Impact**
-   - Total money saved today
-   - Simulated cost calculations
-
-5. **Dev Controls**
-   - "Simulate Incident Lifecycle" button
-   - Resets incident simulation
-
----
-
-## Local Development Setup
-
-### Running Without Docker (Advanced)
-
-#### Setup Core API Locally
-
-```bash
-cd aegis_core
-
-# Create venv
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install deps
-pip install -r requirements.txt
-
-# Set env vars
-export GEMINI_API_KEY=your_key
-export SLACK_BOT_TOKEN=xoxb-your-token
-
-# Run
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-```
-
-**Then start other services in Docker:**
-```bash
-# In docker-compose.yml, remove aegis-agent service
-# Keep buggy-app-v2 and aegis-dashboard
-docker-compose up buggy-app-v2 aegis-dashboard
-```
-
-#### Setup Buggy App Locally
-
-```bash
-cd aegis_infra
-
-python -m venv venv
-source venv/bin/activate
-
-pip install -r requirements.txt
-
-python src/app.py  # Runs on localhost:8000
-```
-
-**Update AegisOps Core to use localhost:**
-```python
-# In aegis_core/app/docker_ops.py
-HEALTH_CHECK_URL = "http://localhost:8000/health"  # Not container name
-```
-
----
-
-## Common Commands
-
-### View Logs
+## Log Monitoring
 
 ```bash
 # All services
 docker-compose logs -f
 
-# Specific service
+# Just AegisOps Core (most informative)
 docker-compose logs aegis-agent -f
+
+# Just the buggy app
 docker-compose logs buggy-app-v2 -f
-docker-compose logs aegis-dashboard -f
 
-# Last N lines
-docker-compose logs -f --tail=50
+# Follow with filter
+docker-compose logs aegis-agent -f | grep -E "RESOLVED|FAILED|Council|RAG"
+
+# Last 50 lines + follow
+docker-compose logs aegis-agent -f --tail=50
 ```
 
-### Restart Services
+### What to look for in logs
 
-```bash
-# Restart one service
-docker-compose restart aegis-agent
-
-# Restart all
-docker-compose restart
-
-# Full rebuild
-docker-compose down
-docker-compose up --build
 ```
-
-### Clean Up
-
-```bash
-# Stop services
-docker-compose down
-
-# Remove volumes (data)
-docker-compose down -v
-
-# Remove images
-docker rmi aegisops:latest ollama:latest
-```
-
-### Shell into Container
-
-```bash
-# AegisOps Core
-docker exec -it aegis-agent bash
-
-# Buggy App
-docker exec -it buggy-app-v2 bash
-
-# Check files
-docker exec aegis-agent ls -la /app/data
+📨 Webhook: <id>           → Incident received
+📚 RAG: Found N similar    → RAG retrieved entries
+📚 RAG: Cold start         → Runbook empty, first incident
+🧠 SRE Agent → action=X    → AI diagnosis complete
+🏛️ Council: APPROVED (3/3) → Council decision
+⚡ Scaling UP: spawning N  → Scale-up starting
+🔄 Restarting container    → Restart action
+💚 Health PASSED            → Verification success
+✅ GOD MODE: Incident RESOLVED
+❌ GOD MODE: Incident FAILED
+📒 Runbook updated - N entries  → Learning happened
 ```
 
 ---
 
-## Debugging
+## Running Without Docker (Advanced)
 
-### Issue: Webhook sent but nothing happens
+### AEGIS CORE
 
-**Debug:**
 ```bash
-# Check logs
-docker-compose logs aegis-agent -f | grep -i error
+cd aegis_core
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
 
-# Check API is responding
-curl http://localhost:8001/docs
+# Create .env
+cp .env.example .env
+# Edit .env with your keys
 
-# Try direct webhook call (see API section)
+# Run
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-### Issue: "Cannot connect to Docker daemon"
+### AEGIS INFRA (Buggy App)
 
-**Solution:**
 ```bash
-# Ensure Docker Desktop running
-open /Applications/Docker.app  # macOS
-# or docker daemon running on Linux
-sudo systemctl start docker
+cd aegis_infra
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python src/app.py  # Runs on port 8000
 ```
+
+When running locally, update the health check URL in `aegis_core/app/config.py`:
+```python
+HEALTH_URL = "http://localhost:8000/health"
+```
+
+### AEGIS COCKPIT (React UI)
+
+```bash
+cd aegis_cockpit
+npm install
+npm run dev  # Runs on port 5173 (Vite dev server)
+```
+
+Update the WebSocket URL in the Dashboard component to point to `ws://localhost:8001/ws`.
+
+---
+
+## Common Commands
+
+```bash
+# Build and start everything
+docker-compose up --build
+
+# Start without rebuild (use cached images)
+docker-compose up
+
+# Stop all services
+docker-compose down
+
+# Stop and remove volumes (clears runbook.json data)
+docker-compose down -v
+
+# Rebuild a single service
+docker-compose build aegis-agent
+docker-compose up --no-deps aegis-agent
+
+# Restart one service
+docker-compose restart aegis-agent
+
+# Shell into a container
+docker exec -it aegis-agent bash
+docker exec -it buggy-app-v2 bash
+
+# View runbook data
+docker exec aegis-agent cat /app/data/runbook.json | python3 -m json.tool
+
+# Clear runbook (reset learning)
+docker exec aegis-agent sh -c 'echo "[]" > /app/data/runbook.json'
+```
+
+---
+
+## Debugging Guide
+
+### Issue: No incident fires automatically
+
+**Check:** Is the memory threshold being hit?
+```bash
+docker exec buggy-app-v2 python3 -c "import psutil; print(psutil.virtual_memory().percent)"
+```
+If < 85%, call `/trigger_memory` more times. You can also send a manual webhook directly.
+
+### Issue: "FASTRTR_API_KEY not set" in logs
+
+**Fix:** Ensure `aegis_core/.env` exists and has the key:
+```bash
+cat aegis_core/.env | grep FASTRTR_API_KEY
+```
+
+### Issue: LLM returns malformed JSON
+
+**Symptom:** `ai_brain.py` logs `Failed to parse JSON`  
+**Fix:** Usually self-correcting on retry. If persistent, check `OLLAMA_MODEL` is downloaded.
+
+### Issue: Scaling fails ("Source container not found")
+
+**Cause:** Target container `buggy-app-v2` is not running.
+```bash
+docker-compose ps buggy-app-v2
+docker-compose up buggy-app-v2
+```
+
+### Issue: Health check fails after restart
+
+**Cause:** Container takes longer than `VERIFY_DELAY_SECS × VERIFY_RETRIES` to come up.
+```bash
+# Increase retries in aegis_core/.env:
+VERIFY_RETRIES=5
+VERIFY_DELAY_SECS=8
+```
+
+### Issue: Cockpit shows blank page
+
+**Cause:** React build not complete, or Nginx on port 3000 not started.
+```bash
+docker-compose logs aegis-cockpit
+# If failed to build, try:
+docker-compose build --no-cache aegis-cockpit
+```
+
+### Issue: WebSocket disconnects immediately
+
+**Cause:** Cockpit is connecting to wrong host. In Docker, the cockpit container should use `ws://aegis-agent:8001/ws`. For local dev, use `ws://localhost:8001/ws`.
 
 ### Issue: Port already in use
 
-**Solution:**
 ```bash
-# Find what's using port 8001
-lsof -i :8001  # macOS/Linux
+# Find what's using the port
+lsof -i :8001   # macOS/Linux
 netstat -ano | findstr :8001  # Windows
 
-# Either kill that process or change ports in docker-compose.yml
+# Or change ports in docker-compose.yml
 ```
 
-### Issue: Container keeps restarting
+---
 
-**Diagnosis:**
-```bash
-docker-compose logs aegis-agent -f
-# Look for repeated restart errors
-```
+## Troubleshooting Reference Table
 
-**Common causes:**
-- Missing `.env` file
-- Invalid API key
-- Port conflict
-- Out of memory
+| Symptom | Likely Cause | Fix |
+|---------|-------------|-----|
+| No automatic incidents | Memory < 85% | Trigger more `/trigger_memory` calls |
+| `FASTRTR_API_KEY not set` | Missing .env | Create `aegis_core/.env` with key |
+| LLM parse error | Malformed JSON response | Usually self-heals; check Ollama model |
+| Council always rejects | Dangerous action proposed | Check AI output; adjust system prompt |
+| Scale-up spawns 0 replicas | Docker API error / no source container | Check `docker-compose logs aegis-agent` |
+| Nginx not reconfiguring | `aegis-lb` container missing | Ensure `docker-compose up aegis-lb` |
+| Cockpit blank page | Build failed / wrong WS URL | Rebuild cockpit; check browser console |
+| No Slack messages | `SLACK_WEBHOOK_URL` not set | Add to `aegis_core/.env` |
+| Runbook not growing | Incidents failing (not resolved) | Fix upstream issue first |
+| Metrics charts empty | WebSocket not connected | Reload Cockpit; check WS connection |
 
 ---
 
 ## Next Steps
 
-1. ✅ Verify all services running
-2. 📖 Read [overview.md](overview.md) for architecture
-3. 🧪 Try all 3 workflows above
-4. 🔧 Customize incident triggers in `aegis_infra/src/app.py`
-5. 🧠 Add new LLM provider (see [llm-strategy.md](llm-strategy.md))
-6. 📚 Explore runbook growth in `data/runbook.json`
-
----
-
-## Getting Help
-
-### Check Logs First
-
-```bash
-docker-compose logs -f 2>&1 | grep -i "error\|exception\|failed"
-```
-
-### Read Documentation
-
-- [overview.md](overview.md) - Architecture & components
-- [architecture.md](architecture.md) - Deep technical dive
-- [api-reference.md](api-reference.md) - API endpoints
-- [llm-strategy.md](llm-strategy.md) - AI engine details
-- [prerequisites.md](prerequisites.md) - Setup & dependencies
-
-### Common Issues & Fixes
-
-| Issue | Fix |
-|-------|-----|
-| 404 on API | Services not all running (`docker-compose up`) |
-| AI analysis fails | Check GEMINI_API_KEY in `.env` |
-| Health check fails | Buggy app not responding (check logs) |
-| Dashboard shows no data | API not responding (check port 8001) |
-| Memory keeps growing | Expected if you keep triggering (restart app) |
-
----
-
-## Tips & Tricks
-
-### Simulate Multiple Incidents Fast
-
-```bash
-for i in {1..5}; do
-  curl http://localhost:8000/trigger_memory &
-done
-wait
-```
-
-### Monitor in Real-Time
-
-**Terminal 1:**
-```bash
-watch -n 1 'docker-compose ps'  # Updates every 1 sec
-```
-
-**Terminal 2:**
-```bash
-docker-compose logs -f --tail=10
-```
-
-**Terminal 3:**
-```bash
-open http://localhost:8501  # Dashboard
-```
-
-### Extract Runbook Data
-
-```bash
-docker exec aegis-agent cat /app/data/runbook.json | jq
-```
-
-### Save API Responses
-
-```bash
-curl http://localhost:8001/incidents > incidents_dump.json
-cat incidents_dump.json | jq  # Pretty print
-```
-
----
-
-## Customization Examples
-
-### Add Custom Health Endpoint
-
-**In `aegis_infra/src/app.py`:**
-```python
-@app.route('/custom_health', methods=['GET'])
-def custom_health():
-    return {"status": "healthy", "db": "connected", "cache": "warm"}
-```
-
-**In `aegis_core/app/verification.py`:**
-```python
-async def verify_health():
-    response = requests.get(
-        "http://buggy-app-v2:8000/custom_health",
-        timeout=5
-    )
-    return response.json()['db'] == "connected"
-```
-
-### Add New Trigger Type
-
-**In `aegis_infra/src/app.py`:**
-```python
-@app.route('/trigger_disk_full', methods=['GET'])
-def trigger_disk_full():
-    # Simulate full disk
-    # Write lots of files, etc.
-    return {"message": "Disk trigger activated"}
-```
-
-### Change Verification Retry Logic
-
-**In `aegis_core/app/verification.py`:**
-```python
-async def verify_health(max_attempts=10):  # Increase retries
-    # ...
-```
-
----
-
-## Performance Tips
-
-### Speed Up Dashboard
-
-```bash
-# Reduce refresh interval in app.py
-streamlit run app.py --client.toolbarMode=minimal
-```
-
-### Reduce Memory Usage
-
-```bash
-# Use smaller Ollama model
-export OLLAMA_MODEL=orca-mini  # vs mistral
-```
-
-### Optimize LLM Calls
-
-```python
-# Cache LLM responses
-from functools import lru_cache
-
-@lru_cache(maxsize=100)
-async def analyze_logs(payload):
-    # ...
-```
-
----
-
-## What To Try Next
-
-1. **Modify LLM System Prompt** - Make AI smarter
-2. **Add New Action Type** - Implement SCALE_UP
-3. **Build Custom Dashboard** - Use Grafana instead of Streamlit
-4. **Add Database** - Persist incidents instead of in-memory
-5. **Deploy to Kubernetes** - Scale to production
-6. **Fine-Tune Model** - Based on your incident patterns
+1. ✅ Verify all services running: `docker-compose ps`
+2. 🧪 Try all 6 workflows above
+3. 📖 Read [architecture.md](architecture.md) for deep technical details
+4. 🔌 Read [api-reference.md](api-reference.md) for all endpoint details
+5. 🧠 Read [llm-strategy.md](llm-strategy.md) for AI/RAG details
+6. 📚 Watch the runbook grow: `curl http://localhost:8001/runbook`
+7. 🚀 Customise: add new trigger endpoints, tweak LLM prompts, add new action types

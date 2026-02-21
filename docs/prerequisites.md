@@ -1,262 +1,254 @@
-# Prerequisites & Setup Guide
+# Prerequisites & Setup Guide — AegisOps GOD MODE v2.0
 
 ## System Requirements
 
 ### Hardware
-- **CPU**: 2+ cores (for parallel container runs and AI inference)
-- **RAM**: 4GB minimum (8GB+ recommended)
-- **Disk**: 2GB free space (for Docker images and logs)
-- **OS**: Windows, macOS, or Linux
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 2 cores | 4+ cores |
+| RAM | 4 GB | 8 GB+ (16 GB if running Ollama locally) |
+| Disk | 3 GB free | 10 GB+ (Docker images + Ollama models) |
+| OS | Windows 10, macOS 11, Ubuntu 20.04 | Any modern 64-bit OS |
 
 ### Software Requirements
 
-#### 1. **Docker & Docker Compose**
-- **Docker Desktop**: v20.10+ or Docker Engine
-- **Docker Compose**: v2.0+
-- Installation: [https://docs.docker.com/get-docker/](https://docs.docker.com/get-docker/)
+#### 1. Docker & Docker Compose (Required)
 
-**Verify installation:**
+- **Docker Desktop** v20.10+ or Docker Engine v20.10+
+- **Docker Compose** v2.0+ (included with Docker Desktop)
+- Installation: https://docs.docker.com/get-docker/
+
 ```bash
+# Verify
 docker --version
+docker compose version
+# or for older installations:
 docker-compose --version
 ```
 
-#### 2. **Python** (if running outside containers)
-- **Python 3.9+**
-- **pip** package manager
-- Installation: [https://www.python.org/downloads/](https://www.python.org/downloads/)
+#### 2. Python 3.9+ (Only if running services outside Docker)
 
-**Verify:**
 ```bash
-python --version
-pip --version
+python3 --version
+pip3 --version
 ```
 
-#### 3. **Git**
-- For cloning and version control
-- Installation: [https://git-scm.com/](https://git-scm.com/)
+#### 3. Node.js 18+ (Only if developing the React Cockpit outside Docker)
+
+```bash
+node --version
+npm --version
+```
+
+#### 4. Git
+
+```bash
+git --version
+```
 
 ---
 
-## API Keys & Credentials Required
+## API Keys & Credentials
 
-Create a `.env` file in the **project root** (`AegisOps/` directory):
+### Required
+
+#### FastRouter API Key (Primary LLM)
+
+Used to call **Claude Sonnet** (or other models) via FastRouter's OpenAI-compatible gateway.
+
+1. Go to https://fastrouter.ai and create an account
+2. Generate an API key
+3. Set in `aegis_core/.env`:
+```env
+FASTRTR_API_KEY=your_api_key_here
+FASTRTR_BASE_URL=https://go.fastrouter.ai/api/v1
+FASTRTR_MODEL=anthropic/claude-sonnet-4-20250514
+```
+
+**Without this key:** AegisOps falls back to Ollama (local). Ollama must be running separately or included in the Docker Compose stack.
+
+### Optional
+
+#### Slack Webhook URL (Notifications)
+
+Sends Block Kit notifications at every pipeline stage.
+
+1. Go to https://api.slack.com/apps → Create New App → From Scratch
+2. Enable **Incoming Webhooks**
+3. Click **Add New Webhook to Workspace** → select a channel
+4. Copy the webhook URL
+5. Set in `aegis_core/.env`:
+```env
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...
+```
+
+Without this: notifications are silently skipped; all other functionality is unaffected.
+
+---
+
+## Environment File Reference
+
+Create `aegis_core/.env` (copy from `aegis_core/.env.example` if it exists):
 
 ```env
-# ── Gemini API (Primary LLM) ──────────────────────────
-GEMINI_API_KEY=your_gemini_api_key_here
+# ── Primary LLM (FastRouter → Claude Sonnet) ────────────────────────
+FASTRTR_API_KEY=your_key_here
+FASTRTR_BASE_URL=https://go.fastrouter.ai/api/v1
+FASTRTR_MODEL=anthropic/claude-sonnet-4-20250514
 
-# ── FastRouter API (Optional, used if GEMINI fails) ──
-FASTRTR_API_KEY=your_fastrtr_api_key_here
-FASTRTR_BASE_URL=https://api.fastrtr.com/v1
-FASTRTR_MODEL=gpt-4-turbo
+# ── Fallback LLM (Ollama local) ─────────────────────────────────────
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=llama3.2:latest
 
-# ── Ollama (Fallback LLM - runs locally, no key needed) ──
-OLLAMA_BASE_URL=http://ollama:11434/v1
-OLLAMA_MODEL=mistral
+# ── Slack (optional) ────────────────────────────────────────────────
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...
 
-# ── Slack Integration ──────────────────────────────────
-SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
-SLACK_CHANNEL_ID=C01234567890
+# ── Docker target ────────────────────────────────────────────────────
+TARGET_CONTAINER=buggy-app-v2
+HEALTH_URL=http://buggy-app-v2:8000/health
 
-# ── OpenTelemetry (Optional) ──────────────────────────
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-OTEL_SERVICE_NAME=aegis-infra
+# ── Verification ─────────────────────────────────────────────────────
+VERIFY_RETRIES=3
+VERIFY_DELAY_SECS=5
+HEALTH_TIMEOUT_SECS=5
+
+# ── Scaling ──────────────────────────────────────────────────────────
+MAX_REPLICAS=5
+NGINX_CONTAINER=aegis-lb
+
+# ── Metrics ──────────────────────────────────────────────────────────
+METRICS_INTERVAL_SECS=3
+
+# ── LLM token limit ──────────────────────────────────────────────────
+LOG_TRUNCATE_CHARS=2000
 ```
-
-### How to Get API Keys
-
-#### **Gemini API Key**
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Sign in with Google account
-3. Create new API key
-4. Copy and paste into `.env`
-
-#### **Slack Bot Token**
-1. Go to [Slack App Dashboard](https://api.slack.com/apps)
-2. Create new app or select existing one
-3. Navigate to "OAuth & Permissions"
-4. Add scopes: `chat:write`
-5. Copy Bot Token (`xoxb-...`)
-
-#### **FastRouter Key** (Optional)
-- Contact FastRouter support or use their dashboard
-- Primary use is as fallback to Gemini
-
-#### **Ollama** (Local, No Key Required)
-- Runs locally in a container
-- Pre-configured in `docker-compose.yml`
-- Can be used without external API keys
 
 ---
 
-## Project Structure Overview
+## Project Structure
 
 ```
 AegisOps/
-├── .env                          # 🔑 API keys (CREATE THIS!)
-├── docker-compose.yml            # Orchestrator
-├── requirements.txt              # Root dependencies (dashboard)
 │
-├── aegis_core/                   # 🧠 AI Agent
+├── docker-compose.yml              # Orchestrates all 5 services
+├── README.md
+├── REPORT.md
+│
+├── aegis_core/                     # 🧠 GOD MODE Backend
+│   ├── .env                        # 🔑 API keys — CREATE THIS!
+│   ├── .env.example                # Template for .env
 │   ├── Dockerfile
-│   ├── requirements.txt           # fastapi, google-generativeai, docker
+│   ├── requirements.txt
 │   └── app/
-│       ├── main.py               # FastAPI server
-│       ├── ai_brain.py           # LLM integration
-│       ├── docker_ops.py         # Container control
-│       ├── verification.py       # Health checks
-│       ├── slack_notifier.py     # Slack alerts
-│       ├── models.py             # Data models
-│       └── config.py             # Configuration
+│       ├── __init__.py
+│       ├── main.py                 # FastAPI app, all routes, WebSocket, metrics loop
+│       ├── ai_brain.py             # RAG engine, LLM clients, streaming, council
+│       ├── docker_ops.py           # Container restart, scaling, metrics, Nginx reload
+│       ├── verification.py         # Health check loop + runbook learning
+│       ├── slack_notifier.py       # Slack Block Kit webhook notifications
+│       ├── models.py               # All Pydantic data models
+│       ├── config.py               # Environment variable configuration
+│       └── ws_manager.py           # WebSocket connection manager
 │
-├── aegis_infra/                  # 🏗️ Buggy App (Target)
+├── aegis_infra/                    # 🏗️ Buggy App (Target/Victim)
 │   ├── Dockerfile
-│   ├── requirements.txt           # flask, opentelemetry, psutil
-│   ├── otel_config.yaml          # Observability config
+│   ├── requirements.txt
 │   └── src/
-│       └── app.py                # Flask server with triggers
+│       └── app.py                  # Flask server: /health + triggers + memory daemon
 │
-├── data/                         # 📊 Shared data
-│   ├── runbook.json              # Learned solutions (auto-grows)
-│   └── sample_incidents.json     # Sample data for dashboard
+├── aegis_cockpit/                  # 🖥️ React SRE Cockpit (Primary UI)
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── tailwind.config.js
+│   ├── nginx.conf                  # Serves built React app on port 3000
+│   └── src/
+│       ├── App.jsx                 # Routes: / (landing) | /login | /dashboard
+│       ├── main.jsx
+│       ├── index.css
+│       ├── hooks/                  # Custom React hooks
+│       └── components/
+│           ├── Dashboard.jsx       # Main SRE cockpit, WebSocket client
+│           ├── AIStreamPanel.jsx   # Typewriter AI reasoning display
+│           ├── IncidentPanel.jsx   # Incident state and timeline
+│           ├── MetricsPanel.jsx    # Live metrics display
+│           ├── MetricsCharts.jsx   # CPU/memory chart components
+│           ├── TopologyPanel.jsx   # Service dependency graph
+│           ├── ScaleControls.jsx   # Manual scale-up/down buttons
+│           ├── Header.jsx          # Connection status bar
+│           ├── LandingPage.jsx     # Marketing landing page
+│           └── LoginPage.jsx       # Authentication form
 │
-└── docs/                         # 📖 Documentation
-    ├── overview.md               # This architecture guide
-    ├── prerequisites.md          # THIS FILE
-    ├── problem.md                # Problem statement
-    ├── architecture.md           # Detailed architecture
-    ├── api-reference.md          # API endpoints
-    ├── llm-strategy.md           # AI engine details
-    └── troubleshooting.md        # Common issues & fixes
+├── aegis_lb/                       # ⚖️ Nginx Load Balancer
+│   ├── Dockerfile
+│   ├── nginx.conf                  # Main nginx config
+│   └── upstream.conf               # Dynamically rewritten by AegisOps Core
+│
+├── aegis_dashboard/                # 📊 Legacy Streamlit Dashboard
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── app.py                      # Streamlit UI (polls REST API)
+│
+├── data/                           # 📁 Shared sample data
+│   ├── runbook.json                # (also at aegis_core/data/runbook.json — live)
+│   └── sample_incidents.json       # Sample data for dashboard fallback
+│
+├── aegis_core/data/                # 📁 Persistent agent data (Docker volume)
+│   └── runbook.json                # Live RAG knowledge base (auto-growing)
+│
+└── docs/                           # 📖 Documentation (this folder)
+    ├── overview.md                 # Project overview & architecture summary
+    ├── architecture.md             # Deep technical dive
+    ├── api-reference.md            # All REST + WebSocket endpoints
+    ├── llm-strategy.md             # RAG, LLM providers, council, streaming
+    ├── getting-started.md          # Setup & testing workflows
+    ├── prerequisites.md            # THIS FILE
+    └── problem.md                  # The SRE problem & business case
 ```
 
 ---
 
-## Local Development Setup
+## Dependency Reference
 
-### Option 1: Docker Compose (Recommended - All in One)
+### AEGIS CORE (Python)
 
-**1. Clone the repository:**
-```bash
-git clone <repo-url>
-cd AegisOps
+```
+fastapi>=0.104.0          Web framework (async, REST + WebSocket)
+uvicorn>=0.24.0           ASGI server
+pydantic>=2.0.0           Data validation and serialization
+openai>=1.0.0             LLM client (used for FastRouter + Ollama, both OpenAI-compatible)
+docker>=7.0.0             Docker Python SDK (container control, metrics)
+httpx>=0.25.0             Async HTTP client (health checks, Slack)
+scikit-learn>=1.3.0       TF-IDF vectorizer for RAG engine
+numpy>=1.24.0             Cosine similarity computation
+python-dotenv>=1.0.0      .env file loading
+python-dateutil>=2.8.0    Container uptime calculation
 ```
 
-**2. Create `.env` file** (see API Keys section above)
+### AEGIS INFRA (Python)
 
-**3. Build and start all services:**
-```bash
-docker-compose up --build
+```
+flask>=2.3.0              Web framework
+psutil>=5.9.0             System memory monitoring
+requests>=2.31.0          Webhook HTTP calls to aegis-agent
 ```
 
-**Services will be available at:**
-- 🤖 **AegisOps Core API**: http://localhost:8001
-- 🏗️ **Buggy App**: http://localhost:8000
-- 🎨 **Dashboard**: http://localhost:8501
+### AEGIS COCKPIT (JavaScript)
 
-**View logs:**
-```bash
-docker-compose logs -f
+```
+react>=18.0.0             UI library
+react-router-dom>=6.0.0   Multi-page routing
+vite>=5.0.0               Build tool
+tailwindcss>=3.0.0        Utility-first CSS framework
 ```
 
-**Stop services:**
-```bash
-docker-compose down
+### AEGIS DASHBOARD (Python)
+
 ```
-
----
-
-### Option 2: Local Development (Python Venv)
-
-**Only if you want to run services locally without Docker**
-
-#### A. Setup AEGIS CORE
-
-```bash
-cd aegis_core
-
-# Create virtual environment
-python -m venv venv
-
-# Activate venv
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Set environment variables
-export GEMINI_API_KEY=your_key_here
-
-# Run FastAPI server
-uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-```
-
-#### B. Setup AEGIS INFRA
-
-```bash
-cd aegis_infra
-
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-
-# Run Flask app
-python src/app.py  # Runs on localhost:8000
-```
-
-#### C. Setup DASHBOARD
-
-```bash
-cd aegis_dashboard  # or root if using root requirements.txt
-
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Run Streamlit
-streamlit run app.py
-# Accessible at http://localhost:8501
-```
-
-**Note:** When running locally, update connection strings in code:
-- Change `http://aegis-agent:8001` → `http://localhost:8001`
-- Change `http://buggy-app-v2:8000` → `http://localhost:8000`
-
----
-
-## Dependency Breakdown
-
-### AEGIS CORE Dependencies
-```
-fastapi>=0.104.0              # Web framework
-uvicorn>=0.24.0               # ASGI server
-google-generativeai>=0.3.0    # Gemini API
-openai>=1.0.0                 # Ollama/FastRouter (OpenAI-compatible)
-docker>=7.0.0                 # Docker SDK
-slack-sdk>=3.26.0             # Slack notifications
-python-dotenv>=1.0.0          # .env file support
-pydantic>=2.0.0               # Data validation
-```
-
-### AEGIS INFRA Dependencies
-```
-flask>=2.3.0                  # Web framework
-psutil>=5.9.0                 # System monitoring
-requests>=2.31.0              # HTTP client
-opentelemetry-api>=1.20.0     # OTEL tracing
-opentelemetry-distro>=0.41b0  # OTEL distribution
-```
-
-### DASHBOARD Dependencies
-```
-streamlit>=1.28.0             # UI framework
-requests>=2.31.0              # HTTP calls
-pandas>=2.0.0                 # Data processing
-streamlit-autorefresh>=2.0.0  # Auto-refresh plugin
+streamlit>=1.28.0         UI framework
+requests>=2.31.0          HTTP API polling
+pandas>=2.0.0             Data processing
 ```
 
 ---
@@ -264,52 +256,44 @@ streamlit-autorefresh>=2.0.0  # Auto-refresh plugin
 ## Network Configuration
 
 ### Docker Compose Network
-- **Network Name**: `aegis-network` (bridge)
-- **Service Discovery**: Container-to-container via hostname
-  - `aegis-agent:8001` (AegisOps Core)
-  - `buggy-app-v2:8000` (Buggy App)
-  - `aegis-dashboard:8501` (Dashboard)
 
-### Port Mappings
-| Service | Internal Port | External Port | Purpose |
-|---------|---------------|---------------|---------|
-| Buggy App | 8000 | 8000 | Flask app & triggers |
-| AegisOps Core | 8001 | 8001 | Webhook API |
-| Dashboard | 8501 | 8501 | Streamlit UI |
+- **Network name:** `aegis-network` (bridge driver)
+- **Service discovery:** containers communicate by container name
+  - `aegis-agent:8001` — AegisOps Core REST + WebSocket
+  - `buggy-app-v2:8000` — Buggy App (Flask)
+  - `aegis-lb:80` — Nginx Load Balancer
+  - `aegis-cockpit:3000` — React SRE Cockpit
+  - `aegis-dashboard:8501` — Streamlit Dashboard
 
-### For Local Development
-Replace container hostnames with `localhost`:
-- `http://localhost:8000` - Buggy App
-- `http://localhost:8001` - Core API
-- `http://localhost:8501` - Dashboard
+### Port Mappings (host ← container)
 
----
+| Service | Container Port | Host Port | Access |
+|---------|---------------|-----------|--------|
+| Buggy App | 8000 | 8000 | `http://localhost:8000` |
+| AegisOps Core | 8001 | 8001 | `http://localhost:8001` |
+| SRE Cockpit | 3000 | 3000 | `http://localhost:3000` |
+| Nginx LB | 80 | 80 | `http://localhost:80` |
+| Legacy Dashboard | 8501 | 8501 | `http://localhost:8501` |
 
-## Configuration Files
+### Docker Socket Access
 
-### 1. `.env` (Must Create!)
-```env
-# See API Keys section above for detailed setup
-GEMINI_API_KEY=...
-SLACK_BOT_TOKEN=...
+AegisOps Core mounts `/var/run/docker.sock` to control Docker from inside the container:
+```yaml
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-### 2. `docker-compose.yml` (Pre-configured)
-- Orchestrates all 3 services
-- Sets environment variables
-- Mounts data volumes
-- Configures network
+This is required for container restart, scaling, and metrics collection.
 
-### 3. `aegis_core/app/config.py`
-Contains configuration constants:
-```python
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
-LOG_TRUNCATE_CHARS = 2000  # Token safety limit
+### Data Volume
+
+Runbook data is persisted on the host via a bind mount:
+```yaml
+volumes:
+  - ./aegis_core/data:/app/data
 ```
 
-### 4. `aegis_infra/otel_config.yaml`
-OpenTelemetry collector configuration (optional)
+This ensures the RAG knowledge base (`runbook.json`) survives container restarts.
 
 ---
 
@@ -317,63 +301,84 @@ OpenTelemetry collector configuration (optional)
 
 After setup, verify everything is working:
 
-- [ ] Docker installed: `docker --version`
-- [ ] Docker Compose installed: `docker-compose --version`
-- [ ] `.env` file created with API keys
-- [ ] Services running: `docker-compose up --build`
-- [ ] Core API responding: `curl http://localhost:8001/docs`
-- [ ] Buggy App responding: `curl http://localhost:8000/health`
-- [ ] Dashboard accessible: `http://localhost:8501` in browser
-- [ ] Logs visible: `docker-compose logs -f`
+```bash
+# 1. All containers running
+docker-compose ps
+
+# 2. Core API responding
+curl http://localhost:8001/health
+# Expected: {"status": "ok", "mode": "GOD_MODE", "version": "2.0.0", "ws_clients": 0}
+
+# 3. Buggy App responding
+curl http://localhost:8000/health
+# Expected: {"status": "ok"}
+
+# 4. SRE Cockpit accessible
+curl -I http://localhost:3000
+# Expected: HTTP 200
+
+# 5. Load balancer routing
+curl http://localhost:80/health
+# Expected: {"status": "ok"}
+
+# 6. Send a test incident
+curl -X POST http://localhost:8001/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"incident_id":"setup-test","alert_type":"Memory Leak","logs":"test"}'
+# Expected: {"incident_id":"setup-test","status":"RECEIVED",...}
+
+# 7. Check it resolves
+sleep 15 && curl -s http://localhost:8001/incidents/setup-test | python3 -c "import sys,json; r=sys.stdin.read(); d=json.loads(r); print(d.get('status','unknown'))" 2>/dev/null || echo "check logs: docker-compose logs aegis-agent"
+# Expected: RESOLVED (or FAILED if no API key — check logs)
+```
 
 ---
 
-## Troubleshooting Common Issues
+## Platform-Specific Notes
 
-### Issue: "Cannot connect to Docker daemon"
-**Solution:**
-- Ensure Docker Desktop is running
-- On Linux, check: `sudo systemctl start docker`
+### macOS
 
-### Issue: "Port 8001/8000/8501 already in use"
-**Solution:**
 ```bash
-# Find process using port
-lsof -i :8001  # macOS/Linux
-netstat -ano | findstr :8001  # Windows
+# Ensure Docker Desktop is running
+open /Applications/Docker.app
 
-# Stop service or change port in docker-compose.yml
+# If ports conflict
+lsof -i :8001 -i :8000 -i :3000
 ```
 
-### Issue: "ModuleNotFoundError: No module named 'fastapi'"
-**Solution:**
+### Linux
+
 ```bash
-# Ensure Docker image rebuilds
-docker-compose build --no-cache
-docker-compose up
+# Start Docker daemon
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# Add your user to docker group (avoid needing sudo)
+sudo usermod -aG docker $USER
+newgrp docker
 ```
 
-### Issue: "GEMINI_API_KEY not found"
-**Solution:**
-- Create `.env` file in project root
-- Restart containers: `docker-compose restart aegis-agent`
+### Windows
 
----
-
-## Next Steps
-
-1. ✅ Complete this prerequisites checklist
-2. 📖 Read [overview.md](overview.md) for architecture details
-3. 🚀 Start services: `docker-compose up --build`
-4. 🧪 Test incident triggers (see API reference)
-5. 🐛 Check logs for errors: `docker-compose logs -f`
+Use **Docker Desktop for Windows** (WSL2 backend recommended).  
+Run all commands in **PowerShell** or **Git Bash**.  
+If port 80 conflicts with IIS, change the LB port in `docker-compose.yml`:
+```yaml
+aegis-lb:
+  ports:
+    - "8080:80"   # Use 8080 instead
+```
 
 ---
 
 ## Additional Resources
 
-- **Docker Documentation**: https://docs.docker.com/
-- **FastAPI Guide**: https://fastapi.tiangolo.com/
-- **Streamlit Docs**: https://docs.streamlit.io/
-- **Gemini API**: https://ai.google.dev/
-- **Slack API**: https://api.slack.com/
+| Resource | URL |
+|----------|-----|
+| Docker Documentation | https://docs.docker.com/ |
+| FastAPI Guide | https://fastapi.tiangolo.com/ |
+| FastRouter | https://fastrouter.ai |
+| Ollama | https://ollama.ai |
+| Streamlit Docs | https://docs.streamlit.io/ |
+| React Docs | https://react.dev |
+| Slack Incoming Webhooks | https://api.slack.com/messaging/webhooks |

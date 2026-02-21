@@ -1,762 +1,559 @@
-# Architecture Deep Dive
+# Architecture Deep Dive — AegisOps GOD MODE v2.0
 
 ## System Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Docker Compose Network                       │
-│                     (aegis-network bridge)                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │               AEGIS CORE (Port 8001)                      │  │
-│  │           Autonomous SRE Agent - FastAPI                 │  │
-│  ├──────────────────────────────────────────────────────────┤  │
-│  │                                                           │  │
-│  │  POST /webhook                                          │  │
-│  │    │                                                    │  │
-│  │    ├─→ [1. PARSE] IncidentPayload validation           │  │
-│  │    │                                                    │  │
-│  │    ├─→ [2. BACKGROUND TASK SPAWN]                      │  │
-│  │    │   └─→ Return 200 OK immediately                   │  │
-│  │    │                                                    │  │
-│  │    └─→ [ASYNC PIPELINE]                                │  │
-│  │        │                                                │  │
-│  │        ├─→ [3. AI ANALYSIS]                             │  │
-│  │        │   ├─→ FastRouter LLM (primary)               │  │
-│  │        │   └─→ Ollama LLM (fallback)                  │  │
-│  │        │   Result: AIAnalysis {root_cause, action}    │  │
-│  │        │                                                │  │
-│  │        ├─→ [4. EXECUTE ACTION]                          │  │
-│  │        │   └─→ Docker SDK → restart container          │  │
-│  │        │                                                │  │
-│  │        ├─→ [5. VERIFY HEALTH]                           │  │
-│  │        │   ├─→ Retry loop (exponential backoff)        │  │
-│  │        │   └─→ Health endpoint: /health                │  │
-│  │        │                                                │  │
-│  │        ├─→ [6. LEARN]                                   │  │
-│  │        │   └─→ Append to runbook.json                  │  │
-│  │        │                                                │  │
-│  │        └─→ [7. NOTIFY]                                  │  │
-│  │            └─→ Slack webhook                            │  │
-│  │                                                           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                    ▲                              │              │
-│                    │                              ▼              │
-│                    │                                            │
-│  ┌──────────────────────────┐   ┌────────────────────────────┐ │
-│  │   BUGGY APP (Port 8000)  │   │ DASHBOARD (Port 8501)      │ │
-│  │    Flask Target          │   │  Streamlit UI              │ │
-│  ├──────────────────────────┤   ├────────────────────────────┤ │
-│  │                          │   │                            │ │
-│  │ GET /health              │   │ Real-time Viz:             │ │
-│  │ GET /trigger_memory      │   │ - CPU/Memory metrics       │ │
-│  │ GET /trigger_cpu         │   │ - Incident lifecycle       │ │
-│  │ GET /trigger_db_latency  │   │ - Runbook viewer           │ │
-│  │                          │   │ - Business impact ($$)     │ │
-│  │ Daemon thread:           │   │                            │ │
-│  │ - Memory monitor         │   │ Fetches from:              │ │
-│  │ - Sends webhooks →       │   │ - /incidents API           │ │
-│  │   AegisOps Core          │   │ - data/sample_incidents.json
-│  │                          │   │                            │ │
-│  └──────────────────────────┘   └────────────────────────────┘ │
-│                                                                   │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │              SHARED DATA VOLUMES                          │  │
-│  │  - data/runbook.json (auto-growing knowledge base)       │  │
-│  │  - data/sample_incidents.json (fallback data)            │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      Docker Compose Network (aegis-network, bridge)           │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  ┌──────────────────────────────────────────────────────────────────────┐    │
+│  │              AEGIS CORE — GOD MODE Backend (Port 8001)                │    │
+│  │         FastAPI + WebSocket + Multi-Agent AI + Docker Ops             │    │
+│  ├──────────────────────────────────────────────────────────────────────┤    │
+│  │                                                                        │    │
+│  │  POST /webhook                                                        │    │
+│  │    │                                                                  │    │
+│  │    ├─→ [1] PARSE  IncidentPayload (Pydantic validation)              │    │
+│  │    ├─→ [2] STORE  in-memory incidents dict                           │    │
+│  │    ├─→ [3] BROADCAST  incident.new  →  WebSocket clients             │    │
+│  │    ├─→ [4] RETURN  200 OK immediately                                │    │
+│  │    └─→ [5] BACKGROUND TASK: _remediate()                             │    │
+│  │                                                                        │    │
+│  │  _remediate() GOD MODE PIPELINE                                      │    │
+│  │    │                                                                  │    │
+│  │    ├─①─ RAG Retrieval (TF-IDF cosine on runbook.json)               │    │
+│  │    │     → top-2 entries injected into SRE system prompt             │    │
+│  │    │     → broadcast ai.thinking "Found N similar incidents"         │    │
+│  │    │                                                                  │    │
+│  │    ├─②─ SRE Analysis (streaming + non-streaming)                    │    │
+│  │    │     → stream_analysis(): streams tokens → ai.stream frames      │    │
+│  │    │     → analyze_logs(): produces AIAnalysis JSON                  │    │
+│  │    │     → broadcast ai.complete                                      │    │
+│  │    │                                                                  │    │
+│  │    ├─③─ Multi-Agent Council                                          │    │
+│  │    │     → SRE Agent vote (APPROVED)                                 │    │
+│  │    │     → Security Officer LLM vote (APPROVED/REJECTED/NEEDS_REVIEW)│    │
+│  │    │     → Auditor LLM vote (APPROVED/REJECTED/NEEDS_REVIEW)        │    │
+│  │    │     → Each vote broadcast: council.vote                         │    │
+│  │    │     → Final: council.decision                                   │    │
+│  │    │     → 2/3 required; REJECTED → abort                           │    │
+│  │    │                                                                  │    │
+│  │    ├─④─ Execute Action                                               │    │
+│  │    │     RESTART   → Docker SDK restart                              │    │
+│  │    │     SCALE_UP  → spawn replicas → reconfigure Nginx              │    │
+│  │    │     SCALE_DOWN→ remove replicas → reconfigure Nginx             │    │
+│  │    │     NOOP      → resolve immediately                             │    │
+│  │    │                                                                  │    │
+│  │    ├─⑤─ Health Verification                                          │    │
+│  │    │     → httpx GET /health with retries + delay                    │    │
+│  │    │     → each attempt broadcast: health.check                      │    │
+│  │    │                                                                  │    │
+│  │    └─⑥─ Runbook Learning                                             │    │
+│  │          → append to runbook.json (incident_id, logs, root_cause,   │    │
+│  │            action, justification, confidence, replicas_used)         │    │
+│  │                                                                        │    │
+│  │  Background metrics loop (every 3s):                                 │    │
+│  │    → Docker stats for all running containers                         │    │
+│  │    → broadcast metrics + container.list frames                       │    │
+│  │                                                                        │    │
+│  └──────────────────────────────────────────────────────────────────────┘    │
+│        ▲ webhooks          │ Docker API        │ Nginx exec          │        │
+│        │                   ▼                   ▼                     │        │
+│  ┌──────────────┐  ┌─────────────────┐  ┌──────────────────────┐   │        │
+│  │ BUGGY APP     │  │ AEGIS COCKPIT   │  │ AEGIS LB             │   │        │
+│  │ Port 8000     │  │ Port 3000       │  │ Port 80              │   │        │
+│  │ Flask target  │  │ React SRE UI    │  │ Nginx upstream LB    │   │        │
+│  └──────────────┘  └─────────────────┘  └──────────────────────┘   │        │
+│                            ↕ WebSocket /ws                            │        │
+│  ┌─────────────────────────────────────────────────────────────────┐ │        │
+│  │ AEGIS DASHBOARD (legacy Streamlit)  Port 8501                   │ │        │
+│  └─────────────────────────────────────────────────────────────────┘ │        │
+│                                                                                │
+│  ┌─────────────────────────────────────────────────────────────────┐         │
+│  │ SHARED VOLUME  ./aegis_core/data:/app/data                       │         │
+│  │  - runbook.json   (RAG knowledge base — auto-growing)            │         │
+│  │  - sample_incidents.json                                          │         │
+│  └─────────────────────────────────────────────────────────────────┘         │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Component Breakdown
 
-### AEGIS CORE: Incident Processing Pipeline
+### AEGIS CORE — File-by-File
 
-#### File: `aegis_core/app/main.py`
+#### `aegis_core/app/main.py` — FastAPI Application & Orchestrator
 
-**Responsibility:** FastAPI server + incident orchestration
+**Entry point.** Registers all REST routes, the `/ws` WebSocket endpoint, and the background metrics loop.
 
-**Key Functions:**
-- `receive_webhook()` - HTTP handler for incidents
-- `_remediate()` - Main async pipeline
+**Lifespan management:**
+- On startup: creates `_metrics_task` — an asyncio Task that calls `get_all_metrics()` every 3 seconds and broadcasts `metrics` + `container.list` frames to all WS clients
+- On shutdown: cancels `_metrics_task`
 
-**Flow:**
-```python
-async def _remediate(payload, result):
-    # 1. Analyze logs with AI
-    try:
-        analysis = await analyze_logs(payload)
-        result.analysis = analysis
-        result.status = ResolutionStatus.EXECUTING
-    except Exception:
-        result.status = ResolutionStatus.FAILED
-        return
-    
-    # 2. Execute action (only RESTART auto-executes)
-    if analysis.action == ActionType.RESTART:
-        await restart_container()
-    
-    # 3. Verify health
-    healthy = await verify_health()
-    
-    # 4. If healthy, learn
-    if healthy:
-        await append_to_runbook(payload, analysis)
-        result.status = ResolutionStatus.RESOLVED
-    else:
-        result.status = ResolutionStatus.FAILED
-```
+**REST Routes:**
 
-**Key Features:**
-- 🔄 **Async/Await** for non-blocking I/O
-- 📋 **BackgroundTasks** for fire-and-forget pipeline
-- 📊 **In-memory Incident Tracker** (dict)
-- 🔗 **CORS enabled** for dashboard API calls
-- 📡 **Slack notifications** at each stage
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/webhook` | Receive incident; spawn remediation as background task |
+| `GET` | `/incidents/{id}` | Query single incident status |
+| `GET` | `/incidents` | List all incidents (in-memory, current session) |
+| `GET` | `/containers` | List all running Docker containers |
+| `GET` | `/metrics` | Live CPU/memory/network for all containers |
+| `POST` | `/scale/{direction}` | Manual scale up/down (`?count=N` for up) |
+| `GET` | `/health` | AegisOps Core health check (`{"status": "ok", "mode": "GOD_MODE", "version": "2.0.0"}`) |
+| `GET` | `/topology` | Service dependency graph (nodes + edges) |
+| `GET` | `/runbook` | Full RAG knowledge base contents |
+| `GET` | `/rag/test` | Test RAG retrieval with `?logs=<text>` |
+
+**WebSocket:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `WS /ws` | Persistent connection; receives all pipeline frames; sends `heartbeat` on `ping` |
+
+**Core async function: `_remediate(payload, result)`**
+
+Runs the complete 7-step GOD MODE pipeline. Wrapped in FastAPI `BackgroundTasks` so the HTTP response returns immediately at `RECEIVED` status while the pipeline executes asynchronously.
+
+**Timeline helper `_timeline(result, status, msg, agent)`** — appends `TimelineEntry` objects to the incident result for full audit trail.
 
 ---
 
-#### File: `aegis_core/app/ai_brain.py`
+#### `aegis_core/app/ai_brain.py` — AI Brain v3.0
 
-**Responsibility:** LLM integration with dual-provider strategy
+**The intelligence layer.** Handles RAG retrieval, LLM calls, streaming, and multi-agent council.
 
-**Dual-Provider Strategy:**
+##### RAG Engine — TF-IDF Runbook Retrieval
 
 ```python
-async def analyze_logs(payload):
-    logs = _truncate_logs(payload.logs, max_chars=2000)
-    
-    # Try FastRouter first (faster, cloud)
-    try:
-        response = await _call_provider(
-            client=_get_fastrtr_client(),
-            model=FASTRTR_MODEL,
-            messages=[...]
-        )
-        analysis = _parse_json(response)
-        return AIAnalysis(**analysis)
-    except Exception:
-        logger.warning("FastRouter failed, falling back to Ollama")
-    
-    # Fallback to Ollama (local, always available)
-    try:
-        response = await _call_provider(
-            client=_get_ollama_client(),
-            model=OLLAMA_MODEL,
-            messages=[...]
-        )
-        analysis = _parse_json(response)
-        return AIAnalysis(**analysis)
-    except Exception:
-        raise RuntimeError("All LLM providers failed")
+def get_relevant_runbook_entries(current_logs, top_k=2, min_similarity=0.05):
+    """
+    Algorithm:
+      1. Load runbook.json → list of past incident dicts
+      2. Build corpus: each entry's logs+alert_type+root_cause+action+justification
+      3. Fit TfidfVectorizer(stop_words='english', ngram_range=(1,2),
+                             max_features=5000, sublinear_tf=True)
+         on [corpus_entries... , current_query]
+      4. Cosine similarity: query_vec vs each corpus_vec
+      5. Return top_k above min_similarity threshold (sorted descending)
+    """
 ```
 
-**System Prompt:**
+**Key properties:**
+- **Zero external API calls** — entirely local computation with scikit-learn
+- **Bigram matching** — "memory leak", "cpu spike" as single features
+- **Sublinear TF** — log-normalises term frequency to reduce dominance of repeated words
+- **Cold start** — empty runbook returns `[]`; agent reasons from first principles
+
+##### RAG-Augmented System Prompt
+
+```python
+def _build_sre_system_prompt(rag_entries):
+    rag_block = _format_rag_context(rag_entries)
+    return _SRE_BASE + rag_block
 ```
-You are an expert SRE diagnostician.
-Analyse the incident payload and return ONLY valid JSON:
+
+The `RUNBOOK KNOWLEDGE` block is injected between the base instructions and the end marker. For each retrieved entry it shows: alert type, root cause, action, justification, replicas used, and a log snippet (first 200 chars).
+
+##### LLM Client Strategy
+
+```
+Primary:  FastRouter (OpenAI-compatible, cloud)
+          model: anthropic/claude-sonnet-4-20250514
+          base_url: https://go.fastrouter.ai/api/v1
+
+Fallback: Ollama (local, OpenAI-compatible)
+          model: llama3.2:latest
+          base_url: http://localhost:11434/v1
+```
+
+Both use `openai.OpenAI` client; all calls are wrapped with `asyncio.to_thread()` to avoid blocking the event loop. Temperature is fixed at `0.2` for deterministic, focused output.
+
+##### Streaming Analysis
+
+```python
+async def stream_analysis(payload) -> AsyncGenerator[str, None]:
+    """
+    Sends the same RAG-augmented prompt with stream=True.
+    Yields individual token strings → each broadcast as ai.stream frame.
+    Typewriter effect in the React cockpit.
+    Falls back to character-by-character if streaming fails.
+    """
+```
+
+##### Non-Streaming Analysis
+
+```python
+async def analyze_logs(payload) -> AIAnalysis:
+    """
+    RAG retrieval → build system prompt → call LLM (primary → fallback)
+    → parse JSON → return AIAnalysis(root_cause, action, justification,
+                                      confidence, replica_count)
+    """
+```
+
+**JSON parsing** strips markdown code fences before `json.loads()`.
+
+##### Multi-Agent Council
+
+```python
+async def council_review(payload, analysis) -> CouncilDecision:
+    """
+    Agent A (SRE):      Already voted via analyze_logs → always APPROVED
+    Agent B (Security): Reviews for safety risks → may REJECT
+    Agent C (Auditor):  Checks compliance/proportionality → may REJECT
+    2/3 majority → final_verdict = APPROVED; else REJECTED
+    """
+```
+
+Each reviewing agent receives the plan text and returns `{"verdict": ..., "reasoning": ...}`. If an agent call fails, it auto-approves with an error note (fail-open by design for SRE).
+
+---
+
+#### `aegis_core/app/docker_ops.py` — Docker Operations
+
+**Wraps the Docker Python SDK** (`docker.from_env()`). All functions use `asyncio.to_thread()`.
+
+| Function | Description |
+|----------|-------------|
+| `restart_container(name, timeout)` | Restarts named container; raises on NotFound/APIError |
+| `get_container_logs(name, tail)` | Returns last N log lines as decoded string |
+| `list_running_containers()` | Returns list of `{name, status, image, id}` |
+| `get_container_metrics(name)` | Single-container CPU/memory/network stats |
+| `get_all_metrics()` | All containers in parallel via `asyncio.gather` |
+| `scale_up(base_name, count, network)` | Clone base container into N replicas on aegis-network |
+| `scale_down(base_name)` | Remove all `{base_name}-replica-*` containers |
+| `reconfigure_nginx(base_name, replicas)` | Write upstream.conf + `nginx -s reload` |
+
+**CPU calculation:**
+```
+cpu_pct = (cpu_delta / system_delta) × num_cpus × 100
+```
+where `cpu_delta = total_usage[now] - total_usage[prev]` and `system_delta` is the system-wide CPU time delta.
+
+**Scale-up implementation:** For each replica index 1..N:
+1. Remove stale replica container if it exists (force)
+2. `client.containers.run(image, name=replica_name, detach=True, network="aegis-network", restart_policy="unless-stopped", environment=source.env)`
+
+**Nginx reconfigure:**  Builds `upstream.conf` with `server {base}:8000;` + one line per replica. Writes it via Docker `put_archive()` (tar stream), then calls `nginx -s reload` via `exec_run()`.
+
+---
+
+#### `aegis_core/app/verification.py` — Health Check & Runbook Learning
+
+**`verify_health(url, retries, delay)`**
+
+Simple fixed-interval retry loop:
+```
+for attempt in 1..retries:
+    await asyncio.sleep(delay)
+    GET url → return True if HTTP 200
+return False
+```
+
+Default: 3 retries, 5 second delay, 5 second timeout per request.
+
+**`append_to_runbook(payload, analysis, council_approved, replicas_used)`**
+
+Builds a `RunbookEntry` and appends it to `runbook.json`:
+```json
 {
-  "root_cause": "<one-line summary>",
-  "action": "RESTART" | "SCALE_UP" | "ROLLBACK" | "NOOP",
-  "justification": "<why>"
+  "incident_id": "...",
+  "alert_type": "Memory Leak",
+  "logs": "<full raw logs — fed to TF-IDF>",
+  "container_name": "buggy-app-v2",
+  "severity": "CRITICAL",
+  "root_cause": "Memory leak in batch event handler",
+  "action": "RESTART",
+  "justification": "...",
+  "confidence": 0.92,
+  "council_approved": true,
+  "replicas_used": 0,
+  "resolved_at": "2026-02-21T18:50:06Z"
 }
 ```
 
-**Token Safety:**
-- Truncates logs to last 2000 chars
-- Prevents token overflow
-- Maintains context of recent errors
-
-**Lazy Initialization:**
-- Clients created on-demand
-- Avoid unnecessary connections
-- Global singletons for reuse
+**Why full logs are saved:** The TF-IDF vectorizer builds similarity on the raw log text. Saving the full logs means future incidents with similar error messages, stack traces, or container names will retrieve this entry.
 
 ---
 
-#### File: `aegis_core/app/docker_ops.py`
+#### `aegis_core/app/ws_manager.py` — WebSocket Connection Manager
 
-**Responsibility:** Docker API integration
-
-**Functions:**
-- `restart_container()` - Restart buggy-app-v2
-- `get_container_logs()` - Fetch last N lines of logs
-- `list_running_containers()` - Enumerate active containers
-
-**Implementation:**
 ```python
-import docker
+class ConnectionManager:
+    _connections: list[WebSocket]
+    _lock: asyncio.Lock
 
-client = docker.from_env()
-
-async def restart_container():
-    container = client.containers.get("buggy-app-v2")
-    container.restart()
-    return container.status
+    async def connect(ws)        # accept + append
+    async def disconnect(ws)     # remove
+    async def broadcast(frame)   # send JSON to all; auto-remove dead connections
+    async def broadcast_raw(frame_type, data, incident_id)  # convenience wrapper
+    @property count              # number of active connections
 ```
 
-**Error Handling:**
-- Catches Docker API failures
-- Logs container state for debugging
-- Returns helpful error messages
+**Thread safety:** `asyncio.Lock` protects `_connections` list from concurrent mutation during broadcast.
+
+**Dead connection cleanup:** If `ws.send_json()` raises, the connection is added to a `dead` list and removed after the broadcast loop completes.
 
 ---
 
-#### File: `aegis_core/app/verification.py`
+#### `aegis_core/app/models.py` — Pydantic Data Models
 
-**Responsibility:** Health verification with retries
-
-**Logic:**
-```python
-async def verify_health(
-    max_attempts=5,
-    initial_delay=1.0,
-    backoff_factor=1.5,
-    timeout=5
-):
-    # Exponential backoff: 1s, 1.5s, 2.25s, 3.375s, 5s
-    for attempt in range(max_attempts):
-        try:
-            response = requests.get(
-                "http://buggy-app-v2:8000/health",
-                timeout=timeout
-            )
-            if response.status_code == 200:
-                return True
-        except Exception:
-            pass
-        
-        await asyncio.sleep(delay)
-        delay *= backoff_factor
-    
-    return False
 ```
-
-**Retry Strategy:**
-- ✅ **Exponential backoff** prevents overwhelming service
-- ✅ **Timeout per request** prevents hanging
-- ✅ **Multiple attempts** account for slow startup
-- ✅ **Final return** all-or-nothing (success/failure)
-
----
-
-#### File: `aegis_core/app/slack_notifier.py`
-
-**Responsibility:** Incident notifications
-
-**Events:**
-- 📬 Received
-- 🔍 Analyzing
-- ⚡ Executing
-- ✅ Resolved
-- ❌ Failed
-
-**Message Format:**
-```
-🔴 [CRITICAL] Memory Leak Detected
-Incident: incident-abc123
-Service: api-backend
-Action: RESTART
-Status: RESOLVED in 3 seconds
-Root Cause: Memory leak in event handler
-
-Actions Taken:
-  1. Analyzed logs with AI
-  2. Restarted container
-  3. Verified health: PASS
-  4. Added to runbook
-
-💾 Money Saved: $250
+IncidentPayload     Input from webhook (incident_id, alert_type, logs, container_name, severity, timestamp)
+AIAnalysis          LLM output (root_cause, action: ActionType, justification, confidence, replica_count)
+ActionType          Enum: RESTART | SCALE_UP | SCALE_DOWN | ROLLBACK | NOOP
+CouncilRole         Enum: SRE_AGENT | SECURITY_OFFICER | AUDITOR
+CouncilVerdict      Enum: APPROVED | REJECTED | NEEDS_REVIEW
+CouncilVote         {role, verdict, reasoning, timestamp}
+CouncilDecision     {votes, final_verdict, consensus: bool, summary}
+ResolutionStatus    Enum: RECEIVED | ANALYSING | COUNCIL_REVIEW | APPROVED | EXECUTING | SCALING | VERIFYING | RESOLVED | FAILED
+TimelineEntry       {ts, status, message, agent}
+IncidentResult      Full incident state: payload fields + analysis + council_decision + status + timeline
+ScaleEvent          {container_base, replica_count, replicas: list[str], lb_configured, timestamp}
+WSFrameType         16 frame type constants for WebSocket messages
+WSFrame             {type, incident_id, data, timestamp}
+RunbookEntry        Persistent learning record (full logs + resolution details)
+ContainerMetrics    {name, cpu_percent, memory_mb, memory_limit_mb, memory_percent, net_rx_bytes, net_tx_bytes, status, uptime_seconds, image}
 ```
 
 ---
 
-#### File: `aegis_core/app/models.py`
+#### `aegis_core/app/config.py` — Configuration
 
-**Responsibility:** Pydantic data models
+All settings from environment variables (`.env` file or container environment):
 
-**Models:**
-```python
-class IncidentPayload(BaseModel):
-    incident_id: str
-    container_name: str
-    alert_type: str
-    severity: str
-    logs: str
-    timestamp: str
-
-class AIAnalysis(BaseModel):
-    root_cause: str
-    action: ActionType
-    justification: str
-
-class IncidentResult(BaseModel):
-    incident_id: str
-    container_name: str
-    status: ResolutionStatus
-    analysis: Optional[AIAnalysis] = None
-    error: Optional[str] = None
-
-class ActionType(str, Enum):
-    RESTART = "RESTART"
-    SCALE_UP = "SCALE_UP"
-    ROLLBACK = "ROLLBACK"
-    NOOP = "NOOP"
-
-class ResolutionStatus(str, Enum):
-    RECEIVED = "RECEIVED"
-    ANALYZING = "ANALYZING"
-    EXECUTING = "EXECUTING"
-    RESOLVED = "RESOLVED"
-    FAILED = "FAILED"
-```
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FASTRTR_API_KEY` | (required) | FastRouter authentication key |
+| `FASTRTR_BASE_URL` | `https://go.fastrouter.ai/api/v1` | FastRouter endpoint |
+| `FASTRTR_MODEL` | `anthropic/claude-sonnet-4-20250514` | Primary LLM model |
+| `LOG_TRUNCATE_CHARS` | `2000` | Max characters sent to LLM |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama local endpoint |
+| `OLLAMA_MODEL` | `llama3.2:latest` | Fallback LLM model |
+| `TARGET_CONTAINER` | `buggy-app-v2` | Container to restart/scale |
+| `HEALTH_URL` | `http://buggy-app-v2:8000/health` | Health check URL |
+| `VERIFY_DELAY_SECS` | `5` | Seconds between health retries |
+| `VERIFY_RETRIES` | `3` | Number of health check attempts |
+| `HEALTH_TIMEOUT_SECS` | `5` | Per-request health check timeout |
+| `SLACK_WEBHOOK_URL` | (optional) | Slack incoming webhook URL |
+| `MAX_REPLICAS` | `5` | Maximum scale-up replica count |
+| `SCALE_COOLDOWN_SECS` | `30` | Reserved for cooldown logic |
+| `NGINX_CONTAINER` | `aegis-lb` | Nginx container name |
+| `NGINX_CONF_PATH` | `/etc/nginx/conf.d/upstream.conf` | Nginx upstream config path |
+| `METRICS_INTERVAL_SECS` | `3` | WebSocket metrics push frequency |
 
 ---
 
-### AEGIS INFRA: The Buggy Application
+#### `aegis_core/app/slack_notifier.py` — Slack Block Kit Notifications
 
-#### File: `aegis_infra/src/app.py`
+Sends Slack Block Kit messages via the configured incoming webhook URL. Called at:
+- `RECEIVED`, `ANALYSING`, `COUNCIL_REVIEW`, `EXECUTING`, `SCALING`, `VERIFYING`, `RESOLVED`, `FAILED`
 
-**Responsibility:** Flask app that crashes in controllable ways
+Non-blocking: `httpx.RequestError` is caught and logged; notification failure never stops the remediation pipeline.
 
-**Endpoints:**
-```python
-@app.route('/health', methods=['GET'])
-def health():
-    """Always returns 200 OK"""
-    return {"status": "ok"}
+Message structure:
+1. **Header block** with status emoji + `AegisOps GOD MODE – {STATUS}`
+2. **Section** with incident ID + alert type
+3. **Section** (if analysis available) with root cause + action + confidence
+4. **Section** (if council available) with individual votes + final verdict
+5. **Section** (if error) with error text in code block
+6. **Divider**
 
-@app.route('/trigger_memory', methods=['GET'])
-def trigger_memory():
-    """Allocates 10MB chunk, simulates leak"""
-    memory_hog.append('x' * (10 * 1024 * 1024))
-    return {"message": "Memory trigger activated"}
+---
 
-@app.route('/trigger_cpu', methods=['GET'])
-def trigger_cpu():
-    """Starts infinite factorial thread"""
-    threading.Thread(target=calculate_factorial_infinite, daemon=True).start()
-    return {"message": "CPU trigger activated"}
+### AEGIS INFRA — Buggy App
 
-@app.route('/trigger_db_latency', methods=['GET'])
-def trigger_db_latency():
-    """Sleeps for 5 seconds"""
-    time.sleep(5)
-    return {"message": "DB latency simulation completed"}
-```
+#### `aegis_infra/src/app.py` — Flask Application
 
-**Background Monitor:**
+**Daemon thread (`memory_monitor`)** starts on first request:
 ```python
 def memory_monitor():
-    """Daemon thread that sends webhooks when memory > 85%"""
     while True:
         memory_percent = psutil.virtual_memory().percent
         if memory_percent > 85:
             payload = {
                 "incident_id": str(uuid.uuid4()),
+                "container_name": "buggy-app-v2",
                 "alert_type": "Memory Leak",
-                "logs": f"Memory: {memory_percent}%..."
+                "severity": "CRITICAL",
+                "logs": f"Memory usage at {memory_percent}%...",
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
-            requests.post("http://aegis-agent:8001/webhook", json=payload)
+            requests.post("http://aegis-agent:8001/webhook", json=payload, timeout=5)
         time.sleep(2)
 ```
 
----
+**Trigger endpoints:**
 
-#### File: `aegis_infra/otel_config.yaml`
-
-**Responsibility:** OpenTelemetry configuration (optional)
-
-**Features:**
-- Distributed tracing
-- Metrics collection
-- Log aggregation
-- Can feed into ELK, Datadog, etc.
+| Endpoint | Effect |
+|----------|--------|
+| `GET /health` | Returns `{"status": "ok"}` — used by verification loop |
+| `GET /trigger_memory` | Appends 10 MB string to `memory_hog` global list; returns current MB allocated |
+| `GET /trigger_cpu` | Starts daemon thread running `math.factorial(n)` in an infinite loop |
+| `GET /trigger_db_latency` | `time.sleep(5)` to simulate a slow query |
 
 ---
 
-### AEGIS DASHBOARD: Real-Time Visualization
+### AEGIS COCKPIT — React SRE UI
 
-#### File: `aegis_dashboard/app.py` or root `app.py`
+**Multi-page React application** served by Nginx on port 3000.
 
-**Responsibility:** Streamlit interactive dashboard
+**Routes:**
+- `/` → `LandingPage` — marketing landing page
+- `/login` → `LoginPage` — authentication form
+- `/dashboard` → `Dashboard` — main SRE cockpit
 
-**Sections:**
-1. **Metrics Row** - CPU, Memory, System Health
-2. **Incident Lifecycle** - 5 stages of remediation
-3. **Raw Incident Data** - JSON viewer
-4. **AI Analysis** - Root cause & action
-5. **Runbook Sidebar** - Learned solutions
-6. **Business Impact** - Money saved metric
-7. **Dev Controls** - Simulate incident lifecycle
+**`Dashboard.jsx`** — the core component:
+- Connects to `ws://aegis-agent:8001/ws` on mount
+- Dispatches incoming frames to the appropriate panel components
+- Manages connection state; auto-reconnects on disconnect
 
-**Session State Machine:**
-```
-Stage 0: Nominal (all green) → 2 sec sleep → Stage 1
-Stage 1: Anomaly (alerts firing) → 2 sec sleep → Stage 2
-Stage 2: AI Brain (analyzing) → 3 sec sleep → Stage 3
-Stage 3: Action (executing) → 1 sec sleep → Stage 4
-Stage 4: Verification (health check) → Done
-```
+**Panel components:**
 
-**Key Features:**
-- 🔄 **Session State** - Maintains incident lifecycle state
-- 🎨 **Expanders** - Collapsible sections for details
-- 🔔 **Toasts** - Popup notifications
-- 📊 **Metrics** - Top-level KPIs
-- 📚 **Sidebar** - Runbook reference
+| Component | Displays |
+|-----------|---------|
+| `AIStreamPanel.jsx` | Typewriter-style AI reasoning tokens as they stream |
+| `IncidentPanel.jsx` | Active incident, status, timeline, analysis result |
+| `MetricsPanel.jsx` + `MetricsCharts.jsx` | Live CPU%, memory MB, network I/O per container |
+| `TopologyPanel.jsx` | Service topology graph (nodes: agent, app, replica, lb, dashboard; edges: monitors, spawned, routes) |
+| `ScaleControls.jsx` | Manual `POST /scale/up` and `POST /scale/down` buttons |
+| `Header.jsx` | Connection status, current mode indicator |
 
 ---
 
-## Data Flow: Complete Incident Journey
+### AEGIS LB — Nginx Load Balancer
 
-### Step 1: Incident Triggered
+**`nginx.conf`** — includes `/etc/nginx/conf.d/upstream.conf` and proxies all traffic to the `buggy_app` upstream.
 
-```bash
-curl http://localhost:8000/trigger_memory
-```
-
-**Effect:**
-- Allocates 10MB of memory
-- Appends to `memory_hog` list
-- Memory grows over time
-
----
-
-### Step 2: Memory Monitor Detects Threshold
-
-**Code (Buggy App Daemon):**
-```python
-memory_percent = psutil.virtual_memory().percent  # e.g., 87%
-if memory_percent > 85:
-    requests.post("http://aegis-agent:8001/webhook", json=payload)
-```
-
-**Payload sent:**
-```json
-{
-  "incident_id": "550e8400-...",
-  "container_name": "buggy-app-v2",
-  "alert_type": "Memory Leak",
-  "severity": "CRITICAL",
-  "logs": "Memory usage at 87%. Potential OOM imminent.",
-  "timestamp": "2024-02-21T03:15:00Z"
+**`upstream.conf`** (dynamically rewritten by AegisOps Core on scale events):
+```nginx
+upstream buggy_app {
+    server buggy-app-v2:8000;
+    server buggy-app-v2-replica-1:8000;    # added on SCALE_UP
+    server buggy-app-v2-replica-2:8000;    # added on SCALE_UP
 }
 ```
 
----
-
-### Step 3: AegisOps Receives & Returns 200 OK
-
-**Code (main.py):**
-```python
-@app.post("/webhook")
-async def receive_webhook(payload, background_tasks):
-    result = IncidentResult(
-        incident_id=payload.incident_id,
-        status=ResolutionStatus.RECEIVED
-    )
-    incidents[payload.incident_id] = result
-    
-    # Spawn background remediation pipeline
-    background_tasks.add_task(_remediate, payload, result)
-    
-    return result  # 200 OK returned immediately
-```
+Rewrite mechanism: AegisOps Core builds the config string, writes it via `docker.put_archive()` as a tar stream into `/etc/nginx/conf.d/`, then calls `nginx -s reload` via `exec_run()`.
 
 ---
 
-### Step 4: AI Analysis (Async, In Background)
+## WebSocket Frame Reference
 
-**Timeline:** ~1-3 seconds
-
-**Code (ai_brain.py):**
-```python
-analysis = await analyze_logs(payload)
-# FastRouter API call:
-# - Truncate logs to 2000 chars
-# - Send to FastRouter LLM (or fallback to Ollama)
-# - Parse JSON response
-# - Return AIAnalysis
-```
-
-**LLM Reasoning:**
-```
-User Message:
-  "Memory usage at 87%. Potential OOM imminent."
-  
-LLM Response:
-  {
-    "root_cause": "Memory leak in batch event handler",
-    "action": "RESTART",
-    "justification": "Pattern matches known issue from 2024-02-19. Container restart will release memory."
-  }
-```
-
-**Result stored:**
-```python
-result.analysis = analysis
-result.status = ResolutionStatus.ANALYZING
-```
-
----
-
-### Step 5: Execute Remediation Action
-
-**Timeline:** ~1 second
-
-**Code (docker_ops.py):**
-```python
-if analysis.action == ActionType.RESTART:
-    container = client.containers.get("buggy-app-v2")
-    container.restart()
-    # Container is now restarting
-```
-
-**Docker Event:**
-```
-Container "buggy-app-v2" stopping...
-Container "buggy-app-v2" stopped
-Container "buggy-app-v2" starting...
-```
-
-**Result updated:**
-```python
-result.status = ResolutionStatus.EXECUTING
-```
-
----
-
-### Step 6: Verify Health (With Retries)
-
-**Timeline:** ~2-5 seconds
-
-**Code (verification.py):**
-```python
-healthy = await verify_health(
-    max_attempts=5,
-    initial_delay=1.0,
-    backoff_factor=1.5
-)
-
-# Attempts:
-# 1. sleep(1s) → GET /health → 503 (starting)
-# 2. sleep(1.5s) → GET /health → 503 (starting)
-# 3. sleep(2.25s) → GET /health → 200 (UP!)
-```
-
-**Result:**
-```
-Attempt 1: [FAIL] Cannot connect (container starting)
-Attempt 2: [FAIL] Cannot connect (container starting)
-Attempt 3: [PASS] {"status": "ok"}
-
-✅ Health Check Passed
-```
-
----
-
-### Step 7: Learn (Append to Runbook)
-
-**Timeline:** ~100ms
-
-**Code (verification.py):**
-```python
-await append_to_runbook(payload, analysis)
-```
-
-**Before:**
+All frames have the shape:
 ```json
 {
-  "entries": [
-    {
-      "timestamp": "2024-02-19 11:42 PM",
-      "issue": "Memory Leak in Event Handler",
-      "fix": "Restart Container"
-    }
-  ]
+  "type": "<WSFrameType>",
+  "incident_id": "<string | null>",
+  "data": "<any>",
+  "timestamp": "<ISO-8601>"
 }
 ```
 
-**After:**
-```json
-{
-  "entries": [
-    {
-      "timestamp": "2024-02-19 11:42 PM",
-      "issue": "Memory Leak in Event Handler",
-      "fix": "Restart Container"
-    },
-    {
-      "timestamp": "2024-02-21 03:15 AM",
-      "issue": "Memory Leak in Batch Event Handler",
-      "fix": "Restart Container",
-      "verified_healthy": true
-    }
-  ]
-}
-```
+| Frame Type | Trigger | Data |
+|-----------|---------|------|
+| `incident.new` | Webhook received | `{incident_id, alert_type, logs[:200]}` |
+| `ai.thinking` | RAG retrieved / analysis starting | `{incident_id, message}` |
+| `ai.stream` | Each LLM token chunk | `{incident_id, chunk, full_text}` |
+| `ai.complete` | Full AIAnalysis ready | `{incident_id, analysis: AIAnalysis}` |
+| `council.vote` | Each agent votes | `{incident_id, vote: CouncilVote}` |
+| `council.decision` | Final council verdict | `{incident_id, decision: CouncilDecision}` |
+| `docker.action` | Container action begins | `{incident_id, action, container}` |
+| `scale.event` | Scale-up/down completed | `{incident_id, event: ScaleEvent}` |
+| `health.check` | Each health attempt | `{incident_id, attempt, healthy}` |
+| `status.update` | Pipeline stage change | `{incident_id, status, message}` |
+| `resolved` | Incident resolved | `{incident_id, resolved_at}` |
+| `failed` | Incident failed | `{incident_id, error}` |
+| `metrics` | Every 3 seconds | `[ContainerMetrics, ...]` |
+| `container.list` | Every 3 seconds | `[{name, status, image, id}, ...]` |
+| `topology` | Reserved | — |
+| `heartbeat` | On connect / client ping | `{status: "connected"}` or `{status: "alive"}` |
 
 ---
 
-### Step 8: Notify Slack
+## Data Persistence
 
-**Timeline:** ~500ms
-
-**Slack Message:**
 ```
-🎉 INCIDENT RESOLVED
-
-ID: 550e8400-...
-Service: api-backend
-Severity: CRITICAL
-MTTR: 3 seconds
-
-Root Cause: Memory leak in batch event handler
-Action: RESTART
-Status: VERIFIED HEALTHY
-
-💰 Money Saved: $25 (vs $7,500 manual MTTR)
-📚 Added to Runbook for future reference
+./aegis_core/data/          (host)
+    └── runbook.json        ← persisted via Docker volume mount
+                              grows with every resolved incident
+                              queried by TF-IDF RAG on every new incident
 ```
+
+The volume mount in `docker-compose.yml`:
+```yaml
+volumes:
+  - ./aegis_core/data:/app/data
+```
+
+`runbook.json` is a JSON array. Each element is a `RunbookEntry` dict. The TF-IDF vectorizer is rebuilt from scratch on every `get_relevant_runbook_entries()` call (stateless, fast for O(100s) entries).
 
 ---
 
-### Step 9: Dashboard Shows Results
+## Error Paths and Resilience
 
-**Timeline:** Real-time
-
-**Dashboard Updates:**
+### LLM Failure
 ```
-CPU: 12% (normal)
-Memory: 45% (recovered from 98%)
-Health: Operational ✅
-
-Incident Lifecycle:
-  [✅ Received] → [✅ Analyzed] → [✅ Executed] → [✅ Verified]
-  
-Runbook Entry Added
+FastRouter → exception → log warning → try Ollama
+Ollama → exception → raise RuntimeError
+RuntimeError → _remediate catches → status=FAILED → broadcast failed → Slack notify
 ```
 
-**Final Status:**
-```json
-{
-  "incident_id": "550e8400-...",
-  "status": "RESOLVED",
-  "analysis": {
-    "root_cause": "Memory leak in batch event handler",
-    "action": "RESTART",
-    "justification": "Pattern matches known issue..."
-  },
-  "error": null
-}
+### Council Failure
+```
+Security/Auditor LLM → exception → auto-approve with error note (fail-open)
+SRE + 2 auto-approved = 3/3 → APPROVED → proceed
+```
+This ensures a council infrastructure failure doesn't block remediation entirely.
+
+### Scale-Up Failure
+```
+scale_up() → exception → log warning → fall back to restart_container()
+restart_container() → exception → status=FAILED
+```
+
+### Health Check Failure
+```
+All retries exhausted → return False
+→ status=FAILED
+→ runbook NOT updated (only save on success)
+→ broadcast failed → Slack notify
+```
+
+### Nginx Reconfigure Failure
+```
+Container 'aegis-lb' not found → log warning → return False
+→ scale still recorded (replicas running, just no LB update)
+```
+
+### Slack Notification Failure
+```
+httpx.RequestError → log warning → return (non-fatal)
+Remediation continues regardless
 ```
 
 ---
 
 ## Scalability Considerations
 
-### Current Design (Single Agent)
-- Handles ~100 incidents/second per instance
-- In-memory incident tracker (data lost on restart)
-- Single Docker host
+### Current Design
+- **In-memory incident tracker**: data lost on agent restart
+- **Single Docker host**: all containers on one machine
+- **Synchronous TF-IDF rebuild**: O(N × features) on each incident; fine for O(100s) runbook entries
 
-### Future Scaling
+### Path to Production
 ```
-┌──────────────────────────────────────┐
-│    Kubernetes Cluster                │
-├──────────────────────────────────────┤
-│                                      │
-│  Pod 1: AegisOps Agent              │
-│  Pod 2: AegisOps Agent              │
-│  Pod 3: AegisOps Agent              │
-│         (horizontal scale)            │
-│                                      │
-│  Service: Load Balancer              │
-│  Storage: PostgreSQL (incident DB)   │
-│  Cache: Redis (runbook cache)        │
-│  Queue: RabbitMQ (incident queue)    │
-│                                      │
-└──────────────────────────────────────┘
-```
-
-**Improvements Needed:**
-- Replace in-memory dict with database
-- Add message queue for incident batching
-- Kubernetes deployment manifests
-- Persistent runbook storage
-- Distributed tracing (Jaeger)
-
----
-
-## Error Paths & Resilience
-
-### Path 1: LLM Failure
-```
-FastRouter fails → Ollama fallback
-Ollama fails → Return FAILED status
-→ Slack notification with error
-→ Manual intervention required
-```
-
-### Path 2: Docker Restart Fails
-```
-Docker API error → Capture logs for debugging
-→ Return FAILED status
-→ Slack notification with container logs
-→ Manual investigation needed
-```
-
-### Path 3: Health Check Fails After Restart
-```
-All retries exhausted → Mark FAILED
-→ Return original logs to engineering
-→ Possible deeper issue (not just restart needed)
-→ Manual escalation
-```
-
-### Path 4: Slack Notification Fails
-```
-Log error, don't block remediation
-Incident still marked RESOLVED
-Missing notification, but action completed
-→ Check logs for alerts
-```
-
----
-
-## Configuration & Customization
-
-### Add New Action Type
-
-**1. Update `models.py`:**
-```python
-class ActionType(str, Enum):
-    RESTART = "RESTART"
-    SCALE_UP = "SCALE_UP"       # NEW
-    ROLLBACK = "ROLLBACK"       # NEW
-    NOOP = "NOOP"
-```
-
-**2. Update LLM System Prompt** (ai_brain.py):
-```python
-SYSTEM_PROMPT = """
-...
-"action": "RESTART" | "SCALE_UP" | "ROLLBACK" | "NOOP"
-...
-"""
-```
-
-**3. Implement Handler** (main.py `_remediate()`):
-```python
-if analysis.action == ActionType.SCALE_UP:
-    await scale_up_service()
-elif analysis.action == ActionType.ROLLBACK:
-    await rollback_deployment()
+Database:       Replace dict with PostgreSQL for persistent incident storage
+Queue:          RabbitMQ/Kafka for incident batching and multi-agent replay
+Kubernetes:     Deploy aegis-agent as a Deployment with HPA
+Persistent RAG: Vector database (Chroma, Pinecone) instead of TF-IDF file
+Authentication: JWT/OAuth2 on all REST endpoints and WebSocket
+Secrets:        Vault or Kubernetes Secrets instead of .env file
+Multi-tenant:   Namespace incidents by team/service
+Tracing:        OpenTelemetry spans through the full pipeline
 ```
 
 ---
@@ -765,20 +562,25 @@ elif analysis.action == ActionType.ROLLBACK:
 
 ### Log Levels
 ```python
-logging.INFO     # Normal flow (webhooks received, analyses, actions)
-logging.WARNING  # Retry scenarios (health check retries, fallback to Ollama)
-logging.ERROR    # Failures (LLM errors, Docker errors, all retries exhausted)
+logging.INFO     # Normal flow: webhook received, analyses, council votes, actions
+logging.WARNING  # Retry scenarios: LLM fallback, health retries, council auto-approve
+logging.ERROR    # Failures: all retries exhausted, Docker API errors
+logging.DEBUG    # Metrics loop errors (suppressed in normal operation)
 ```
 
-### Key Metrics to Track
-- Incidents received per minute
-- Average MTTR
-- Success rate (% RESOLVED vs FAILED)
-- AI accuracy (% of recommended actions correct)
-- Runbook growth (entries per day)
-- Cost savings ($$ impact)
+### Built-in Metrics
+- `GET /metrics` — live container CPU/memory/network via Docker stats API
+- `GET /health` — agent status + WebSocket client count
+- `GET /runbook` — total runbook entry count (RAG corpus size)
 
-### OpenTelemetry Integration (Optional)
-- Trace each incident through full pipeline
-- Measure latency at each step
-- Export to Jaeger, Datadog, or New Relic
+### Key Operational Metrics to Track
+| Metric | Why |
+|--------|-----|
+| Incidents resolved / failed per hour | Success rate |
+| Average pipeline duration (webhook → resolved) | MTTR |
+| LLM primary success rate | FastRouter health |
+| RAG retrieval hit rate (entries > 0) | Knowledge base coverage |
+| Council rejection rate | Safety signal |
+| Runbook entries total | Learning velocity |
+| WebSocket client count | Cockpit adoption |
+
