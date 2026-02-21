@@ -41,6 +41,7 @@ services:
     env_file: ./aegis_core/.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./aegis_core/data:/app/data  # persist runbook and agent data across restarts
     depends_on:
       - buggy-app-v2
       - aegis-lb
