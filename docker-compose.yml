@@ -1,0 +1,37 @@
+version: '3.8'
+
+networks:
+  aegis-network:
+    driver: bridge
+
+services:
+  buggy-app-v2:
+    build:
+      context: ./aegis_infra
+    container_name: buggy-app-v2
+    ports:
+      - "8000:8000"
+    networks:
+      - aegis-network
+    restart: unless-stopped
+
+  aegis-agent:
+    build:
+      context: ./aegis_core
+    container_name: aegis-agent
+    ports:
+      - "8001:8001"
+    networks:
+      - aegis-network
+    env_file: .env
+    restart: unless-stopped
+
+  aegis-dashboard:
+    build:
+      context: ./aegis_dashboard
+    container_name: aegis-dashboard
+    ports:
+      - "8501:8501"
+    networks:
+      - aegis-network
+    restart: unless-stopped
