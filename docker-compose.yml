@@ -5,6 +5,7 @@ networks:
     driver: bridge
 
 services:
+  # ── Target Application ─────────────────────────────────────────────
   buggy-app-v2:
     build:
       context: ./aegis_infra
@@ -15,6 +16,20 @@ services:
       - aegis-network
     restart: unless-stopped
 
+  # ── Nginx Load Balancer (Omnipotence) ──────────────────────────────
+  aegis-lb:
+    build:
+      context: ./aegis_lb
+    container_name: aegis-lb
+    ports:
+      - "80:80"
+    networks:
+      - aegis-network
+    depends_on:
+      - buggy-app-v2
+    restart: unless-stopped
+
+  # ── AegisOps Agent Core (GOD MODE Backend) ─────────────────────────
   aegis-agent:
     build:
       context: ./aegis_core
@@ -28,8 +43,23 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - buggy-app-v2
+      - aegis-lb
     restart: unless-stopped
 
+  # ── SRE Cockpit (React UI – Omniscience) ───────────────────────────
+  aegis-cockpit:
+    build:
+      context: ./aegis_cockpit
+    container_name: aegis-cockpit
+    ports:
+      - "3000:3000"
+    networks:
+      - aegis-network
+    depends_on:
+      - aegis-agent
+    restart: unless-stopped
+
+  # ── Legacy Streamlit Dashboard (kept for backwards compat) ─────────
   aegis-dashboard:
     build:
       context: ./aegis_dashboard

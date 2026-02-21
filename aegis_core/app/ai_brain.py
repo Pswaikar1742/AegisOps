@@ -1,12 +1,12 @@
 """
-AegisOps – AI Brain with FastRouter primary + Ollama local fallback.
+AegisOps GOD MODE – AI Brain with streaming + Multi-Agent Council.
 
-Flow:
-  1. Truncate logs to last 2 000 chars (token safety).
-  2. Try FastRouter (cloud LLM) first.
-  3. If FastRouter fails → fall back to Ollama running locally.
-  4. Parse strict JSON response into AIAnalysis.
-  5. Never auto-retry the same provider (save credits / time).
+Primary:  FastRouter (Claude)
+Fallback: Ollama (local llama3.2)
+
+Features:
+  • Streaming response for typewriter effect on UI
+  • Council of 3 agents: SRE, Security Officer, Auditor
 """
 
 from __future__ import annotations
@@ -14,160 +14,257 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import AsyncGenerator
 
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
 
 from .config import (
-    FASTRTR_API_KEY,
-    FASTRTR_BASE_URL,
-    FASTRTR_MODEL,
+    FASTRTR_API_KEY, FASTRTR_BASE_URL, FASTRTR_MODEL,
+    OLLAMA_BASE_URL, OLLAMA_MODEL,
     LOG_TRUNCATE_CHARS,
-    OLLAMA_BASE_URL,
-    OLLAMA_MODEL,
 )
-from .models import AIAnalysis, IncidentPayload
+from .models import (
+    AIAnalysis, CouncilDecision, CouncilRole, CouncilVerdict,
+    CouncilVote, IncidentPayload,
+)
 
 logger = logging.getLogger("aegis.ai_brain")
 
-# ── Clients (lazy-initialised once each) ─────────────────────────────
-_fastrtr_client: OpenAI | None = None
-_ollama_client: OpenAI | None = None
+_primary_client: OpenAI | None = None
+_fallback_client: OpenAI | None = None
 
 
-def _get_fastrtr_client() -> OpenAI:
-    global _fastrtr_client
-    if _fastrtr_client is None:
+def _get_primary() -> OpenAI:
+    global _primary_client
+    if _primary_client is None:
         if not FASTRTR_API_KEY:
-            raise RuntimeError("FASTRTR_API_KEY is not set.")
-        _fastrtr_client = OpenAI(
-            base_url=FASTRTR_BASE_URL,
-            api_key=FASTRTR_API_KEY,
-        )
-        logger.info("FastRouter client ready  (model=%s)", FASTRTR_MODEL)
-    return _fastrtr_client
+            raise RuntimeError("FASTRTR_API_KEY not set")
+        _primary_client = OpenAI(base_url=FASTRTR_BASE_URL, api_key=FASTRTR_API_KEY)
+        logger.info("FastRouter client ready (model=%s)", FASTRTR_MODEL)
+    return _primary_client
 
 
-def _get_ollama_client() -> OpenAI:
-    """Ollama exposes an OpenAI-compatible /v1 endpoint – no key needed."""
-    global _ollama_client
-    if _ollama_client is None:
-        _ollama_client = OpenAI(
-            base_url=OLLAMA_BASE_URL,
-            api_key="ollama",  # Ollama ignores the key but the SDK requires one
-        )
-        logger.info("Ollama client ready     (model=%s, url=%s)", OLLAMA_MODEL, OLLAMA_BASE_URL)
-    return _ollama_client
+def _get_fallback() -> OpenAI:
+    global _fallback_client
+    if _fallback_client is None:
+        _fallback_client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+        logger.info("Ollama fallback client ready (model=%s)", OLLAMA_MODEL)
+    return _fallback_client
 
 
-# ── Token-safety: truncate logs ──────────────────────────────────────
-def _truncate_logs(raw_logs: str, max_chars: int = LOG_TRUNCATE_CHARS) -> str:
-    """Keep only the **last** `max_chars` characters of the log blob."""
-    if len(raw_logs) <= max_chars:
-        return raw_logs
-    logger.info(
-        "Truncating logs from %d → %d chars.",
-        len(raw_logs),
-        max_chars,
-    )
-    return raw_logs[-max_chars:]
+def _truncate_logs(raw: str, max_chars: int = LOG_TRUNCATE_CHARS) -> str:
+    if len(raw) <= max_chars:
+        return raw
+    return raw[-max_chars:]
 
 
-# ── System prompt ────────────────────────────────────────────────────
-SYSTEM_PROMPT = (
+# ── System prompts ───────────────────────────────────────────────────
+SRE_SYSTEM = (
     "You are an expert SRE diagnostician.\n"
-    "Analyse the incident payload below and return **only** valid JSON "
-    "– no markdown, no backticks, no extra text.\n\n"
-    "Required JSON schema:\n"
-    '{\n'
-    '  "root_cause": "<one-line summary>",\n'
-    '  "action": "RESTART" | "SCALE_UP" | "ROLLBACK" | "NOOP",\n'
-    '  "justification": "<why you chose this action>"\n'
-    '}\n'
+    "Analyse the incident payload and return **only** valid JSON:\n"
+    '{"root_cause": "<one-line>", "action": "RESTART"|"SCALE_UP"|"SCALE_DOWN"|"ROLLBACK"|"NOOP", '
+    '"justification": "<why>", "confidence": 0.0-1.0, "replica_count": <int>}\n'
+    "For CPU spikes or memory leaks, prefer SCALE_UP with replica_count=2-3.\n"
+    "For DB issues, prefer RESTART. For minor issues, use NOOP.\n"
+    "Return ONLY the JSON object."
+)
+
+SECURITY_SYSTEM = (
+    "You are a Security & Compliance Officer reviewing an SRE's proposed action.\n"
+    "Given the incident and the proposed plan, return **only** valid JSON:\n"
+    '{"verdict": "APPROVED"|"REJECTED"|"NEEDS_REVIEW", '
+    '"reasoning": "<security assessment>"}\n'
+    "APPROVE safe actions (restart, scale up/down). "
+    "REJECT dangerous actions (rollback without backup, arbitrary code execution). "
+    "Return ONLY the JSON object."
+)
+
+AUDITOR_SYSTEM = (
+    "You are a Corporate Auditor logging compliance decisions.\n"
+    "Given the incident, the SRE plan, and the security review, return **only** valid JSON:\n"
+    '{"verdict": "APPROVED"|"REJECTED"|"NEEDS_REVIEW", '
+    '"reasoning": "<compliance log entry>"}\n'
+    "Check: Is the action proportionate? Is there an audit trail? "
+    "APPROVE if the action is safe and logged. Return ONLY the JSON object."
 )
 
 
-# ── Internal: call a single provider ─────────────────────────────────
-def _call_provider(client: OpenAI, model: str, messages: list[dict]) -> str:
-    """Blocking call – always run inside asyncio.to_thread."""
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
+def _parse_json(raw: str) -> dict:
+    """Parse JSON from LLM response, stripping markdown fences."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    return json.loads(raw)
+
+
+async def _call_llm(system: str, user_msg: str, model: str | None = None) -> str:
+    """Call LLM with primary → fallback strategy. Returns raw text."""
+    used_model = model or FASTRTR_MODEL
+
+    # Try primary
+    try:
+        client = _get_primary()
+        resp = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=used_model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as exc:
+        logger.warning("Primary LLM failed: %s – trying Ollama fallback", exc)
+
+    # Fallback
+    client = _get_fallback()
+    resp = await asyncio.to_thread(
+        client.chat.completions.create,
+        model=OLLAMA_MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_msg},
+        ],
         temperature=0.2,
     )
-    return response.choices[0].message.content.strip()
+    return resp.choices[0].message.content.strip()
 
 
-def _parse_json(raw: str) -> dict:
-    """Strip optional markdown fences and parse JSON."""
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    return json.loads(text)
-
-
-# ── Public entry point ───────────────────────────────────────────────
-async def analyze_logs(payload: IncidentPayload) -> AIAnalysis:
+async def stream_analysis(payload: IncidentPayload) -> AsyncGenerator[str, None]:
     """
-    Analyse incident logs via LLM.
-
-    Strategy:
-      • Try FastRouter first (cloud, high quality).
-      • On ANY failure → fall back to local Ollama (free, offline).
-      • If both fail → raise so caller can mark incident FAILED.
+    Stream AI thinking tokens for the typewriter effect.
+    Yields individual characters/chunks of the SRE analysis.
     """
-
     safe_logs = _truncate_logs(payload.logs)
+    user_msg = (
+        f"Incident ID : {payload.incident_id}\n"
+        f"Alert Type  : {payload.alert_type}\n"
+        f"Logs (last {LOG_TRUNCATE_CHARS} chars):\n{safe_logs}"
+    )
 
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                f"Incident ID : {payload.incident_id}\n"
-                f"Alert Type  : {payload.alert_type}\n"
-                f"Logs (last {LOG_TRUNCATE_CHARS} chars):\n{safe_logs}"
-            ),
-        },
-    ]
-
-    # ── Attempt 1: FastRouter ────────────────────────────────────────
     try:
-        logger.info("🌐 Trying FastRouter (%s)…", FASTRTR_MODEL)
-        raw = await asyncio.to_thread(
-            _call_provider, _get_fastrtr_client(), FASTRTR_MODEL, messages,
-        )
-        logger.debug("FastRouter raw: %s", raw)
-        data = _parse_json(raw)
-        analysis = AIAnalysis(**data)
-        logger.info(
-            "✅ FastRouter → cause=%s  action=%s",
-            analysis.root_cause, analysis.action.value,
-        )
-        return analysis
+        client = _get_primary()
+        model = FASTRTR_MODEL
+    except Exception:
+        client = _get_fallback()
+        model = OLLAMA_MODEL
 
-    except Exception as cloud_exc:  # noqa: BLE001
-        logger.warning(
-            "⚠️  FastRouter failed (%s) – falling back to Ollama.", cloud_exc,
-        )
-
-    # ── Attempt 2: Ollama (local) ────────────────────────────────────
     try:
-        logger.info("🏠 Trying Ollama (%s)…", OLLAMA_MODEL)
-        raw = await asyncio.to_thread(
-            _call_provider, _get_ollama_client(), OLLAMA_MODEL, messages,
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=model,
+            messages=[
+                {"role": "system", "content": SRE_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+            stream=True,
         )
-        logger.debug("Ollama raw: %s", raw)
-        data = _parse_json(raw)
-        analysis = AIAnalysis(**data)
-        logger.info(
-            "✅ Ollama    → cause=%s  action=%s",
-            analysis.root_cause, analysis.action.value,
-        )
-        return analysis
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    except Exception:
+        # Non-streaming fallback
+        raw = await _call_llm(SRE_SYSTEM, user_msg)
+        for char in raw:
+            yield char
 
-    except Exception as local_exc:  # noqa: BLE001
-        logger.error("❌ Ollama also failed: %s", local_exc)
-        raise RuntimeError(
-            f"Both LLM providers failed.  "
-            f"FastRouter: {cloud_exc}  |  Ollama: {local_exc}"
-        ) from local_exc
+
+async def analyze_logs(payload: IncidentPayload) -> AIAnalysis:
+    """SRE Agent analysis – non-streaming version for pipeline use."""
+    safe_logs = _truncate_logs(payload.logs)
+    user_msg = (
+        f"Incident ID : {payload.incident_id}\n"
+        f"Alert Type  : {payload.alert_type}\n"
+        f"Logs (last {LOG_TRUNCATE_CHARS} chars):\n{safe_logs}"
+    )
+    raw = await _call_llm(SRE_SYSTEM, user_msg)
+    data = _parse_json(raw)
+    analysis = AIAnalysis(**data)
+    logger.info("SRE Agent ➜ cause=%s action=%s conf=%.2f",
+                analysis.root_cause, analysis.action.value, analysis.confidence)
+    return analysis
+
+
+async def council_review(
+    payload: IncidentPayload,
+    analysis: AIAnalysis,
+) -> CouncilDecision:
+    """
+    Multi-Agent Council: 3 agents vote on the proposed action.
+
+    Agent A (SRE):              Already voted via analyze_logs
+    Agent B (Security Officer): Reviews the plan for safety
+    Agent C (Auditor):          Logs for compliance
+    """
+    decision = CouncilDecision()
+
+    # Agent A: SRE already analysed – record vote
+    sre_vote = CouncilVote(
+        role=CouncilRole.SRE_AGENT,
+        verdict=CouncilVerdict.APPROVED,
+        reasoning=f"Proposing {analysis.action.value}: {analysis.justification}",
+    )
+    decision.votes.append(sre_vote)
+
+    # Build context for reviewing agents
+    plan_text = (
+        f"Incident: {payload.incident_id} ({payload.alert_type})\n"
+        f"Root Cause: {analysis.root_cause}\n"
+        f"Proposed Action: {analysis.action.value}\n"
+        f"Confidence: {analysis.confidence}\n"
+        f"Replica Count: {analysis.replica_count}\n"
+        f"Justification: {analysis.justification}\n"
+    )
+
+    # Agent B: Security Officer
+    try:
+        sec_raw = await _call_llm(SECURITY_SYSTEM, plan_text)
+        sec_data = _parse_json(sec_raw)
+        sec_vote = CouncilVote(
+            role=CouncilRole.SECURITY_OFFICER,
+            verdict=CouncilVerdict(sec_data.get("verdict", "APPROVED")),
+            reasoning=sec_data.get("reasoning", "No issues found"),
+        )
+    except Exception as exc:
+        logger.warning("Security agent failed: %s – auto-approving", exc)
+        sec_vote = CouncilVote(
+            role=CouncilRole.SECURITY_OFFICER,
+            verdict=CouncilVerdict.APPROVED,
+            reasoning=f"Auto-approved (agent error: {exc})",
+        )
+    decision.votes.append(sec_vote)
+
+    # Agent C: Auditor
+    audit_context = plan_text + f"\nSecurity Review: {sec_vote.verdict.value} - {sec_vote.reasoning}"
+    try:
+        aud_raw = await _call_llm(AUDITOR_SYSTEM, audit_context)
+        aud_data = _parse_json(aud_raw)
+        aud_vote = CouncilVote(
+            role=CouncilRole.AUDITOR,
+            verdict=CouncilVerdict(aud_data.get("verdict", "APPROVED")),
+            reasoning=aud_data.get("reasoning", "Logged for compliance"),
+        )
+    except Exception as exc:
+        logger.warning("Auditor agent failed: %s – auto-approving", exc)
+        aud_vote = CouncilVote(
+            role=CouncilRole.AUDITOR,
+            verdict=CouncilVerdict.APPROVED,
+            reasoning=f"Auto-approved (agent error: {exc})",
+        )
+    decision.votes.append(aud_vote)
+
+    # Tally votes
+    approvals = sum(1 for v in decision.votes if v.verdict == CouncilVerdict.APPROVED)
+    decision.consensus = approvals >= 2
+    decision.final_verdict = (
+        CouncilVerdict.APPROVED if decision.consensus else CouncilVerdict.REJECTED
+    )
+    decision.summary = (
+        f"Council voted {approvals}/3 APPROVED. "
+        f"Final: {decision.final_verdict.value}"
+    )
+    logger.info("🏛️ Council: %s (%d/3 approved)", decision.final_verdict.value, approvals)
+
+    return decision

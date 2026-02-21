@@ -1,10 +1,5 @@
 """
-AegisOps – Slack notifications via Incoming Webhook.
-
-Sends rich Block Kit messages to a Slack channel at each pipeline
-stage: received → analysing → executing → resolved / failed.
-
-If SLACK_WEBHOOK_URL is not set, all calls silently no-op.
+AegisOps GOD MODE – Slack Block Kit notifications.
 """
 
 from __future__ import annotations
@@ -15,15 +10,19 @@ from typing import Optional
 import httpx
 
 from .config import SLACK_WEBHOOK_URL
-from .models import AIAnalysis, IncidentPayload, ResolutionStatus
+from .models import AIAnalysis, CouncilDecision, IncidentPayload, ResolutionStatus
 
 logger = logging.getLogger("aegis.slack")
 
-# ── Emoji mapping ────────────────────────────────────────────────────
 _STATUS_EMOJI = {
+    ResolutionStatus.RECEIVED: "📨",
     ResolutionStatus.ANALYSING: "🔍",
+    ResolutionStatus.COUNCIL_REVIEW: "🏛️",
+    ResolutionStatus.APPROVED: "✅",
     ResolutionStatus.EXECUTING: "⚙️",
-    ResolutionStatus.RESOLVED: "✅",
+    ResolutionStatus.SCALING: "⚡",
+    ResolutionStatus.VERIFYING: "🩺",
+    ResolutionStatus.RESOLVED: "🎉",
     ResolutionStatus.FAILED: "❌",
 }
 
@@ -32,26 +31,20 @@ async def notify(
     payload: IncidentPayload,
     status: ResolutionStatus,
     analysis: Optional[AIAnalysis] = None,
+    council: Optional[CouncilDecision] = None,
     error: Optional[str] = None,
 ) -> None:
-    """
-    Post a Slack message for this incident.
-
-    Silently returns if SLACK_WEBHOOK_URL is empty or the POST fails
-    (notifications must never crash the pipeline).
-    """
     if not SLACK_WEBHOOK_URL:
         return
 
     emoji = _STATUS_EMOJI.get(status, "ℹ️")
 
-    # ── Build the Slack Block Kit payload ─────────────────────────────
     blocks: list[dict] = [
         {
             "type": "header",
             "text": {
                 "type": "plain_text",
-                "text": f"{emoji}  AegisOps – {status.value}",
+                "text": f"{emoji}  AegisOps GOD MODE – {status.value}",
                 "emoji": True,
             },
         },
@@ -65,49 +58,42 @@ async def notify(
     ]
 
     if analysis:
-        blocks.append(
-            {
-                "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Root Cause:*\n{analysis.root_cause}"},
-                    {"type": "mrkdwn", "text": f"*Action:*\n`{analysis.action.value}`"},
-                ],
-            }
+        blocks.append({
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Root Cause:*\n{analysis.root_cause}"},
+                {"type": "mrkdwn", "text": f"*Action:*\n`{analysis.action.value}` (conf: {analysis.confidence:.0%})"},
+            ],
+        })
+
+    if council:
+        vote_text = "\n".join(
+            f"• *{v.role.value}*: {v.verdict.value} – _{v.reasoning[:80]}_"
+            for v in council.votes
         )
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Justification:*\n_{analysis.justification}_",
-                },
-            }
-        )
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*🏛️ Council Votes:*\n{vote_text}"},
+        })
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Final Verdict:* `{council.final_verdict.value}` | {council.summary}"},
+        })
 
     if error:
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Error:*\n```{error}```",
-                },
-            }
-        )
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Error:*\n```{error}```"},
+        })
 
     blocks.append({"type": "divider"})
 
-    body = {"blocks": blocks}
-
-    # ── Fire-and-forget POST ─────────────────────────────────────────
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(SLACK_WEBHOOK_URL, json=body)
+            resp = await client.post(SLACK_WEBHOOK_URL, json={"blocks": blocks})
             if resp.status_code == 200:
-                logger.info("📣 Slack notified → %s", status.value)
+                logger.info("📣 Slack → %s", status.value)
             else:
-                logger.warning(
-                    "Slack webhook returned %d: %s", resp.status_code, resp.text,
-                )
+                logger.warning("Slack returned %d", resp.status_code)
     except httpx.RequestError as exc:
         logger.warning("Slack notification failed (non-fatal): %s", exc)
