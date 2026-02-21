@@ -18,7 +18,7 @@ class IncidentPayload(BaseModel):
     logs: str = Field(..., description="Raw log snippet forwarded by the collector")
 
 
-# ── Gemini's structured response ─────────────────────────────────────
+# ── LLM structured response ──────────────────────────────────────────
 class ActionType(str, Enum):
     RESTART = "RESTART"
     SCALE_UP = "SCALE_UP"

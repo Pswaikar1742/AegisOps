@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
-from .ai_brain import analyse_incident
+from .ai_brain import analyze_logs
 from .docker_ops import restart_container
 from .models import (
     ActionType,
@@ -41,7 +41,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AegisOps – Autonomous SRE Agent",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -49,18 +49,33 @@ app = FastAPI(
 # ── Background remediation pipeline ─────────────────────────────────
 async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
     """
-    Full async pipeline:
-      analyse → act → verify → learn
-    Runs as a background task so the webhook responds instantly.
+    Full async pipeline:  analyse → act → verify → learn
+    Runs as a BackgroundTask so the webhook responds instantly.
+
+    Error policy: if the LLM API call fails we log the error and
+    mark the incident FAILED – we do **not** retry automatically
+    to avoid burning API credits.
     """
     try:
-        # 1️⃣  AI reasoning
-        analysis = await analyse_incident(payload)
+        # 1️⃣  AI reasoning (logs are auto-truncated inside analyze_logs)
+        analysis = await analyze_logs(payload)
         result.analysis = analysis
         result.status = ResolutionStatus.EXECUTING
 
+    except Exception as exc:  # noqa: BLE001  ← NO RETRY
+        result.status = ResolutionStatus.FAILED
+        result.error = f"LLM call failed – not retrying: {exc}"
+        logger.error(
+            "🚫 LLM error for incident %s (no retry): %s",
+            payload.incident_id,
+            exc,
+        )
+        return  # bail out – don't touch Docker
+
+    try:
         # 2️⃣  Execute action
         if analysis.action == ActionType.RESTART:
+            logger.info("🔄 Restarting container for incident %s…", payload.incident_id)
             await restart_container()
         else:
             logger.info(
@@ -70,12 +85,12 @@ async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
             result.status = ResolutionStatus.RESOLVED
             return
 
-        # 3️⃣  Verify
+        # 3️⃣  Verify (wait 5 s, then health-check)
         healthy = await verify_health()
 
         if healthy:
             result.status = ResolutionStatus.RESOLVED
-            # 4️⃣  Learn
+            # 4️⃣  Learn – append to runbook.json
             await append_to_runbook(payload, analysis)
             logger.info("✅ Incident %s RESOLVED.", payload.incident_id)
         else:
@@ -94,7 +109,7 @@ incidents: dict[str, IncidentResult] = {}
 
 
 # ── Routes ───────────────────────────────────────────────────────────
-@app.post("/webhook", response_model=IncidentResult, status_code=202)
+@app.post("/webhook", response_model=IncidentResult, status_code=200)
 async def receive_webhook(
     payload: IncidentPayload,
     background_tasks: BackgroundTasks,
@@ -102,7 +117,9 @@ async def receive_webhook(
     """
     Receive an alert from the OpenTelemetry Collector.
 
-    Returns 202 immediately; remediation runs in the background.
+    Returns **200 OK** immediately; the heavy remediation pipeline
+    (AI reasoning → Docker restart → health check → runbook) runs
+    as a FastAPI BackgroundTask.
     """
     logger.info(
         "📨 Webhook received – incident=%s type=%s",
