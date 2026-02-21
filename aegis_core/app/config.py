@@ -19,6 +19,10 @@ FASTRTR_MODEL: str = os.getenv(
 # ── Token-safety ─────────────────────────────────────────────────────
 LOG_TRUNCATE_CHARS: int = int(os.getenv("LOG_TRUNCATE_CHARS", "2000"))
 
+# ── Ollama local fallback ────────────────────────────────────────────
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3")
+
 # ── Docker target ────────────────────────────────────────────────────
 TARGET_CONTAINER: str = os.getenv("TARGET_CONTAINER", "buggy-app-v2")
 HEALTH_URL: str = os.getenv(
@@ -27,6 +31,7 @@ HEALTH_URL: str = os.getenv(
 
 # ── Verification timing ─────────────────────────────────────────────
 VERIFY_DELAY_SECS: int = int(os.getenv("VERIFY_DELAY_SECS", "5"))
+VERIFY_RETRIES: int = int(os.getenv("VERIFY_RETRIES", "3"))
 HEALTH_TIMEOUT_SECS: int = int(os.getenv("HEALTH_TIMEOUT_SECS", "5"))
 
 # ── Runbook persistence ─────────────────────────────────────────────

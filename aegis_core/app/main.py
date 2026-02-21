@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from .ai_brain import analyze_logs
-from .docker_ops import restart_container
+from .docker_ops import restart_container, get_container_logs, list_running_containers
 from .models import (
     ActionType,
     IncidentPayload,
@@ -41,7 +41,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(
     title="AegisOps – Autonomous SRE Agent",
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -50,58 +50,68 @@ app = FastAPI(
 async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
     """
     Full async pipeline:  analyse → act → verify → learn
+
     Runs as a BackgroundTask so the webhook responds instantly.
 
-    Error policy: if the LLM API call fails we log the error and
-    mark the incident FAILED – we do **not** retry automatically
-    to avoid burning API credits.
+    Error policy
+    ────────────
+    • LLM failure   → mark FAILED, do NOT touch Docker.
+    • Docker failure → mark FAILED, capture container logs for debug.
+    • Health failure → mark FAILED after all retries are exhausted.
     """
+
+    # ── 1. AI Reasoning (FastRouter → Ollama fallback) ───────────────
     try:
-        # 1️⃣  AI reasoning (logs are auto-truncated inside analyze_logs)
         analysis = await analyze_logs(payload)
         result.analysis = analysis
         result.status = ResolutionStatus.EXECUTING
-
-    except Exception as exc:  # noqa: BLE001  ← NO RETRY
+    except Exception as exc:  # noqa: BLE001
         result.status = ResolutionStatus.FAILED
         result.error = f"LLM call failed – not retrying: {exc}"
         logger.error(
-            "🚫 LLM error for incident %s (no retry): %s",
-            payload.incident_id,
-            exc,
+            "🚫 LLM error for incident %s: %s", payload.incident_id, exc,
         )
-        return  # bail out – don't touch Docker
+        return
+
+    # ── 2. Execute Action ────────────────────────────────────────────
+    if analysis.action != ActionType.RESTART:
+        logger.info(
+            "Action '%s' is not auto-executable – marking resolved.",
+            analysis.action.value,
+        )
+        result.status = ResolutionStatus.RESOLVED
+        return
 
     try:
-        # 2️⃣  Execute action
-        if analysis.action == ActionType.RESTART:
-            logger.info("🔄 Restarting container for incident %s…", payload.incident_id)
-            await restart_container()
-        else:
-            logger.info(
-                "Action '%s' is not auto-executable – skipping.",
-                analysis.action.value,
-            )
-            result.status = ResolutionStatus.RESOLVED
-            return
-
-        # 3️⃣  Verify (wait 5 s, then health-check)
-        healthy = await verify_health()
-
-        if healthy:
-            result.status = ResolutionStatus.RESOLVED
-            # 4️⃣  Learn – append to runbook.json
-            await append_to_runbook(payload, analysis)
-            logger.info("✅ Incident %s RESOLVED.", payload.incident_id)
-        else:
-            result.status = ResolutionStatus.FAILED
-            result.error = "Health check failed after restart."
-            logger.warning("❌ Incident %s FAILED verification.", payload.incident_id)
-
+        logger.info("🔄 Restarting container for incident %s…", payload.incident_id)
+        container_status = await restart_container()
+        logger.info("Container post-restart: %s", container_status)
     except Exception as exc:  # noqa: BLE001
         result.status = ResolutionStatus.FAILED
-        result.error = str(exc)
-        logger.exception("Pipeline error for incident %s", payload.incident_id)
+        result.error = f"Docker restart failed: {exc}"
+        logger.error(
+            "🐳 Docker error for incident %s: %s", payload.incident_id, exc,
+        )
+        # Grab container logs for post-mortem
+        try:
+            tail = await get_container_logs()
+            logger.info("Container tail-logs:\n%s", tail)
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    # ── 3. Verify (health-check with retries) ───────────────────────
+    healthy = await verify_health()
+
+    if healthy:
+        result.status = ResolutionStatus.RESOLVED
+        # ── 4. Learn – append to runbook.json ────────────────────────
+        await append_to_runbook(payload, analysis)
+        logger.info("✅ Incident %s RESOLVED.", payload.incident_id)
+    else:
+        result.status = ResolutionStatus.FAILED
+        result.error = "Health check failed after restart (all retries exhausted)."
+        logger.warning("❌ Incident %s FAILED verification.", payload.incident_id)
 
 
 # ── In-memory incident tracker (good enough for hackathon) ───────────
@@ -144,6 +154,24 @@ async def get_incident(incident_id: str):
     if incident_id not in incidents:
         raise HTTPException(status_code=404, detail="Incident not found.")
     return incidents[incident_id]
+
+
+@app.get("/incidents")
+async def list_incidents():
+    """List every tracked incident (useful for the dashboard)."""
+    return list(incidents.values())
+
+
+@app.get("/containers")
+async def containers():
+    """Debug endpoint – list all running Docker containers."""
+    try:
+        return await list_running_containers()
+    except Exception as exc:
+        return JSONResponse(
+            {"error": str(exc)},
+            status_code=500,
+        )
 
 
 @app.get("/health")

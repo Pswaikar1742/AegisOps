@@ -1,11 +1,12 @@
 """
-AegisOps – AI Brain powered by FastRouter (OpenAI-compatible API).
+AegisOps – AI Brain with FastRouter primary + Ollama local fallback.
 
-Sends incident logs to the LLM and expects STRICT JSON:
-  {"root_cause": "...", "action": "RESTART", "justification": "..."}
-
-Token-safety: raw logs are truncated to the last 2 000 characters
-before they leave this process – no full dumps ever hit the API.
+Flow:
+  1. Truncate logs to last 2 000 chars (token safety).
+  2. Try FastRouter (cloud LLM) first.
+  3. If FastRouter fails → fall back to Ollama running locally.
+  4. Parse strict JSON response into AIAnalysis.
+  5. Never auto-retry the same provider (save credits / time).
 """
 
 from __future__ import annotations
@@ -14,35 +15,48 @@ import asyncio
 import json
 import logging
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
-from .config import FASTRTR_API_KEY, FASTRTR_BASE_URL, FASTRTR_MODEL, LOG_TRUNCATE_CHARS
+from .config import (
+    FASTRTR_API_KEY,
+    FASTRTR_BASE_URL,
+    FASTRTR_MODEL,
+    LOG_TRUNCATE_CHARS,
+    OLLAMA_BASE_URL,
+    OLLAMA_MODEL,
+)
 from .models import AIAnalysis, IncidentPayload
 
 logger = logging.getLogger("aegis.ai_brain")
 
-# ── OpenAI-compatible client (lazy-initialised once) ─────────────────
-_client: OpenAI | None = None
+# ── Clients (lazy-initialised once each) ─────────────────────────────
+_fastrtr_client: OpenAI | None = None
+_ollama_client: OpenAI | None = None
 
 
-def _get_client() -> OpenAI:
-    """Return (and cache) the OpenAI client pointed at FastRouter."""
-    global _client
-    if _client is None:
+def _get_fastrtr_client() -> OpenAI:
+    global _fastrtr_client
+    if _fastrtr_client is None:
         if not FASTRTR_API_KEY:
-            raise RuntimeError(
-                "FASTRTR_API_KEY is not set – export it before starting the server."
-            )
-        _client = OpenAI(
+            raise RuntimeError("FASTRTR_API_KEY is not set.")
+        _fastrtr_client = OpenAI(
             base_url=FASTRTR_BASE_URL,
             api_key=FASTRTR_API_KEY,
         )
-        logger.info(
-            "FastRouter client initialised (model=%s, url=%s).",
-            FASTRTR_MODEL,
-            FASTRTR_BASE_URL,
+        logger.info("FastRouter client ready  (model=%s)", FASTRTR_MODEL)
+    return _fastrtr_client
+
+
+def _get_ollama_client() -> OpenAI:
+    """Ollama exposes an OpenAI-compatible /v1 endpoint – no key needed."""
+    global _ollama_client
+    if _ollama_client is None:
+        _ollama_client = OpenAI(
+            base_url=OLLAMA_BASE_URL,
+            api_key="ollama",  # Ollama ignores the key but the SDK requires one
         )
-    return _client
+        logger.info("Ollama client ready     (model=%s, url=%s)", OLLAMA_MODEL, OLLAMA_BASE_URL)
+    return _ollama_client
 
 
 # ── Token-safety: truncate logs ──────────────────────────────────────
@@ -51,9 +65,8 @@ def _truncate_logs(raw_logs: str, max_chars: int = LOG_TRUNCATE_CHARS) -> str:
     if len(raw_logs) <= max_chars:
         return raw_logs
     logger.info(
-        "Truncating logs from %d → %d chars (last %d kept).",
+        "Truncating logs from %d → %d chars.",
         len(raw_logs),
-        max_chars,
         max_chars,
     )
     return raw_logs[-max_chars:]
@@ -73,53 +86,88 @@ SYSTEM_PROMPT = (
 )
 
 
+# ── Internal: call a single provider ─────────────────────────────────
+def _call_provider(client: OpenAI, model: str, messages: list[dict]) -> str:
+    """Blocking call – always run inside asyncio.to_thread."""
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.2,
+    )
+    return response.choices[0].message.content.strip()
+
+
+def _parse_json(raw: str) -> dict:
+    """Strip optional markdown fences and parse JSON."""
+    text = raw.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    return json.loads(text)
+
+
+# ── Public entry point ───────────────────────────────────────────────
 async def analyze_logs(payload: IncidentPayload) -> AIAnalysis:
     """
-    Send *truncated* logs to the LLM and parse its strict-JSON response.
+    Analyse incident logs via LLM.
 
-    • Logs are capped to the last 2 000 characters before leaving.
-    • On LLM failure the exception propagates (caller decides retry policy).
+    Strategy:
+      • Try FastRouter first (cloud, high quality).
+      • On ANY failure → fall back to local Ollama (free, offline).
+      • If both fail → raise so caller can mark incident FAILED.
     """
 
     safe_logs = _truncate_logs(payload.logs)
 
-    user_msg = (
-        f"Incident ID : {payload.incident_id}\n"
-        f"Alert Type  : {payload.alert_type}\n"
-        f"Logs (last {LOG_TRUNCATE_CHARS} chars):\n{safe_logs}"
-    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                f"Incident ID : {payload.incident_id}\n"
+                f"Alert Type  : {payload.alert_type}\n"
+                f"Logs (last {LOG_TRUNCATE_CHARS} chars):\n{safe_logs}"
+            ),
+        },
+    ]
 
-    client = _get_client()
-
-    # The openai SDK is synchronous – offload to a thread so the
-    # FastAPI event-loop is never blocked.
-    response = await asyncio.to_thread(
-        client.chat.completions.create,
-        model=FASTRTR_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_msg},
-        ],
-        temperature=0.2,
-    )
-
-    raw: str = response.choices[0].message.content.strip()
-    logger.debug("LLM raw response: %s", raw)
-
-    # Strip markdown code fences the model might add anyway.
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-
+    # ── Attempt 1: FastRouter ────────────────────────────────────────
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        logger.error("LLM returned non-JSON: %s", raw)
-        raise ValueError(f"LLM response is not valid JSON: {exc}") from exc
+        logger.info("🌐 Trying FastRouter (%s)…", FASTRTR_MODEL)
+        raw = await asyncio.to_thread(
+            _call_provider, _get_fastrtr_client(), FASTRTR_MODEL, messages,
+        )
+        logger.debug("FastRouter raw: %s", raw)
+        data = _parse_json(raw)
+        analysis = AIAnalysis(**data)
+        logger.info(
+            "✅ FastRouter → cause=%s  action=%s",
+            analysis.root_cause, analysis.action.value,
+        )
+        return analysis
 
-    analysis = AIAnalysis(**data)
-    logger.info(
-        "Analysis ➜ cause=%s  action=%s",
-        analysis.root_cause,
-        analysis.action.value,
-    )
-    return analysis
+    except Exception as cloud_exc:  # noqa: BLE001
+        logger.warning(
+            "⚠️  FastRouter failed (%s) – falling back to Ollama.", cloud_exc,
+        )
+
+    # ── Attempt 2: Ollama (local) ────────────────────────────────────
+    try:
+        logger.info("🏠 Trying Ollama (%s)…", OLLAMA_MODEL)
+        raw = await asyncio.to_thread(
+            _call_provider, _get_ollama_client(), OLLAMA_MODEL, messages,
+        )
+        logger.debug("Ollama raw: %s", raw)
+        data = _parse_json(raw)
+        analysis = AIAnalysis(**data)
+        logger.info(
+            "✅ Ollama    → cause=%s  action=%s",
+            analysis.root_cause, analysis.action.value,
+        )
+        return analysis
+
+    except Exception as local_exc:  # noqa: BLE001
+        logger.error("❌ Ollama also failed: %s", local_exc)
+        raise RuntimeError(
+            f"Both LLM providers failed.  "
+            f"FastRouter: {cloud_exc}  |  Ollama: {local_exc}"
+        ) from local_exc

@@ -1,8 +1,8 @@
 """
 AegisOps – Post-action verification loop & runbook learning.
 
-1. Waits VERIFY_DELAY_SECS seconds.
-2. Pings the container health endpoint.
+1. Waits VERIFY_DELAY_SECS seconds after a restart.
+2. Pings the container health endpoint (retries up to VERIFY_RETRIES times).
 3. If healthy → writes a learning entry to runbook.json.
 """
 
@@ -20,29 +20,52 @@ from .config import (
     HEALTH_URL,
     RUNBOOK_PATH,
     VERIFY_DELAY_SECS,
+    VERIFY_RETRIES,
 )
 from .models import AIAnalysis, IncidentPayload, RunbookEntry
 
 logger = logging.getLogger("aegis.verification")
 
 
-# ── Health check ─────────────────────────────────────────────────────
-async def verify_health(url: str = HEALTH_URL) -> bool:
+# ── Health check with retries ────────────────────────────────────────
+async def verify_health(
+    url: str = HEALTH_URL,
+    retries: int = VERIFY_RETRIES,
+    delay: int = VERIFY_DELAY_SECS,
+) -> bool:
     """
-    Wait, then ping the target service.  Returns True when status 200.
-    """
-    logger.info("Waiting %ds before health check…", VERIFY_DELAY_SECS)
-    await asyncio.sleep(VERIFY_DELAY_SECS)
+    Wait *delay* seconds, then ping the target service.
 
-    try:
-        async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT_SECS) as client:
-            resp = await client.get(url)
-            healthy = resp.status_code == 200
-            logger.info("Health check %s → %s", url, resp.status_code)
-            return healthy
-    except httpx.RequestError as exc:
-        logger.warning("Health check failed: %s", exc)
-        return False
+    Retries up to *retries* times with *delay*-second gaps.
+    Returns True on the first 200 OK; False if all attempts fail.
+    """
+    for attempt in range(1, retries + 1):
+        logger.info(
+            "⏳ Health check attempt %d/%d – waiting %ds…",
+            attempt, retries, delay,
+        )
+        await asyncio.sleep(delay)
+
+        try:
+            async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT_SECS) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200:
+                    logger.info(
+                        "💚 Health check PASSED on attempt %d (%s → 200)",
+                        attempt, url,
+                    )
+                    return True
+                logger.warning(
+                    "Health check attempt %d → HTTP %d (expected 200)",
+                    attempt, resp.status_code,
+                )
+        except httpx.RequestError as exc:
+            logger.warning(
+                "Health check attempt %d failed: %s", attempt, exc,
+            )
+
+    logger.error("❌ All %d health-check attempts failed.", retries)
+    return False
 
 
 # ── Runbook learning ─────────────────────────────────────────────────
@@ -64,7 +87,10 @@ async def append_to_runbook(
     def _write() -> None:
         # Read existing entries (or start fresh)
         if path.exists() and path.stat().st_size > 2:
-            data = json.loads(path.read_text())
+            try:
+                data = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                data = []
         else:
             data = []
 
@@ -74,6 +100,6 @@ async def append_to_runbook(
 
         data.append(entry.model_dump())
         path.write_text(json.dumps(data, indent=2) + "\n")
-        logger.info("Runbook updated – now contains %d entries.", len(data))
+        logger.info("📒 Runbook updated – now contains %d entries.", len(data))
 
     await asyncio.to_thread(_write)
