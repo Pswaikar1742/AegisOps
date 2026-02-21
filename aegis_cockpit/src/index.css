@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply transition-colors duration-200;
+  }
+}
+
+/* Scan line overlay effect */
+.scan-overlay::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.4), transparent);
+  animation: scanLine 4s linear infinite;
+  pointer-events: none;
+}
+
+/* Glowing text */
+.text-glow {
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5), 0 0 20px rgba(0, 255, 136, 0.3);
+}
+
+.text-glow-danger {
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.5), 0 0 20px rgba(239, 68, 68, 0.3);
+}
+
+/* Panel glass effect */
+.glass-panel {
+  background: rgba(17, 24, 39, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(31, 41, 55, 0.8);
+}
+
+/* Typewriter cursor */
+.typewriter-cursor::after {
+  content: '▊';
+  animation: blink 1s step-end infinite;
+  color: #00ff88;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Grid background */
+.grid-bg {
+  background-image: 
+    linear-gradient(rgba(0, 255, 136, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 136, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Status indicators */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot.healthy { background: #00ff88; box-shadow: 0 0 6px #00ff88; }
+.status-dot.warning { background: #ff6b35; box-shadow: 0 0 6px #ff6b35; }
+.status-dot.critical { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.status-dot.neutral { background: #6b7280; }
+
+/* Metric bar animations */
+.metric-bar {
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
