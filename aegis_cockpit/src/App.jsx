@@ -1,13 +1,12 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import LandingPage from './components/LandingPage';
-import Dashboard from './components/Dashboard';
+import DashboardCockpit from './components/DashboardCockpit';
 
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/" element={<DashboardCockpit />} />
+      <Route path="/dashboard" element={<DashboardCockpit />} />
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

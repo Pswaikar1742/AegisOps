@@ -270,19 +270,39 @@ export default function Dashboard() {
     const activeIncidents = useMemo(() => incidents.filter(i => !['RESOLVED','resolved'].includes(i.status)), [incidents]);
 
     const triggerDemo = useCallback(async () => {
-        const types = ['Memory Leak','CPU Spike','Disk Full','Network Timeout','OOM Kill'];
-        const sev = ['CRITICAL','HIGH','MEDIUM'];
+        const types = ['memory_oom','network_latency','cpu_spike','db_connection','disk_space','pod_crash'];
         const id = `INC-${Date.now().toString(36).toUpperCase()}`;
         const at = types[Math.floor(Math.random()*types.length)];
-        const sv = sev[Math.floor(Math.random()*sev.length)];
         try {
-            await fetch('/api/webhook', {
+            await fetch('/webhook', {
                 method:'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ incident_id: id, container_name: 'buggy-app-v2', alert_type: at, severity: sv,
-                    logs: `${at} detected. Usage critical. Container ${id} nearing limits. Immediate action required.`,
-                    timestamp: new Date().toISOString() }),
+                body: JSON.stringify({ incident_id: id, alert_type: at, severity: 'critical', source: 'prometheus',
+                    timestamp: new Date().toISOString(), details: { service: 'buggy-app-v2', pod: `buggy-app-v2-${Math.floor(Math.random()*10000)}`, namespace: 'production' } }),
             });
         } catch (e) { console.error('Trigger failed:', e); }
+    }, []);
+
+    const triggerIncident = useCallback(async (alertType) => {
+        try {
+            const response = await fetch('/webhook', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    incident_id: `INC-${Math.random().toString(16).slice(2, 10).toUpperCase()}`,
+                    alert_type: alertType,
+                    severity: 'critical',
+                    source: 'prometheus',
+                    timestamp: new Date().toISOString(),
+                    details: {
+                        service: 'buggy-app-v2',
+                        pod: `buggy-app-v2-${Math.floor(Math.random() * 10000)}`,
+                        namespace: 'production',
+                        message: `Triggered ${alertType} incident for demo`
+                    }
+                })
+            });
+            if (!response.ok) console.error('Trigger failed:', response.status);
+        } catch (e) { console.error('Trigger error:', e); }
     }, []);
 
     const navItems = [
@@ -299,69 +319,6 @@ export default function Dashboard() {
 
     const renderDashboard = () => (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 auto-rows-min">
-            {/* Quick Stats Row */}
-            <W title="System Overview" className="md:col-span-2 xl:col-span-3">
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    {[
-                        { label:'Containers', value: containers.length||'…', icon:'🐳', color:'text-aegis-accent' },
-                        { label:'Active Issues', value: activeIncidents.length, icon:'🔥', color: activeIncidents.length>0?'text-red-400':'text-green-400' },
-                        { label:'Resolved', value: resolvedCount || incidents.filter(i=>['RESOLVED','resolved'].includes(i.status)).length, icon:'✅', color:'text-green-400' },
-                        { label:'Failed', value: failedCount || incidents.filter(i=>['FAILED','failed'].includes(i.status)).length, icon:'💀', color:'text-red-400' },
-                        { label:'WS Clients', value: health?.ws_clients||'…', icon:'📡', color:'text-aegis-accent' },
-                    ].map(s => (
-                        <div key={s.label} className="text-center py-3 px-2 rounded-xl bg-aegis-bg/50 border border-white/5 hover:border-aegis-accent/20 transition-all">
-                            <div className="text-xl mb-1">{s.icon}</div>
-                            <div className={`text-2xl font-bold font-mono ${s.color}`}>{s.value}</div>
-                            <div className="text-[9px] text-gray-500 uppercase tracking-wider mt-1">{s.label}</div>
-                        </div>
-                    ))}
-                </div>
-            </W>
-
-            {/* System Health */}
-            <W title="System Health" badge={connected ? 'LIVE' : 'OFFLINE'}>
-                <div className="space-y-3">
-                    {systemHealth.map(m => (
-                        <div key={m.label}>
-                            <div className="flex justify-between text-xs mb-1"><span className="text-gray-400">{m.label}</span><span className="font-mono font-bold" style={{color:m.color}}>{m.value}%</span></div>
-                            <div className="h-2.5 bg-aegis-bg rounded-full overflow-hidden"><div className="h-full rounded-full metric-bar" style={{width:`${Math.max(m.value,1)}%`,background:`linear-gradient(90deg,${m.color}88,${m.color})`,boxShadow:`0 0 8px ${m.color}44`}} /></div>
-                        </div>
-                    ))}
-                    {latestMetrics.length > 0 && (
-                        <div className="mt-3 space-y-1.5 border-t border-white/5 pt-3">
-                            <span className="text-[10px] font-mono text-gray-600 uppercase tracking-wider font-semibold">Container Metrics</span>
-                            {latestMetrics.map((m,i) => (
-                                <div key={i} className="flex items-center justify-between text-[11px] font-mono py-0.5">
-                                    <span className="text-gray-400 truncate max-w-[110px]">{(m.name||'').replace(/aegisops[-_]?/,'')}</span>
-                                    <div className="flex gap-4">
-                                        <span className="text-aegis-accent">{(m.cpu_percent||0).toFixed(1)}% <span className="text-gray-600">cpu</span></span>
-                                        <span className="text-purple-400">{(m.memory_percent||0).toFixed(1)}% <span className="text-gray-600">mem</span></span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </W>
-
-            {/* Metrics Chart */}
-            <W title="CPU / Memory Over Time" badge="STREAMING" className="xl:col-span-2">
-                {metricsHistory.length > 2 ? (
-                    <ResponsiveContainer width="100%" height={180}>
-                        <AreaChart data={metricsHistory}>
-                            <defs>
-                                <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#DB0927" stopOpacity={0.4}/><stop offset="100%" stopColor="#DB0927" stopOpacity={0}/></linearGradient>
-                                <linearGradient id="gMem" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#09D8C7" stopOpacity={0.4}/><stop offset="100%" stopColor="#09D8C7" stopOpacity={0}/></linearGradient>
-                            </defs>
-                            <XAxis dataKey="time" tick={{fontSize:9,fill:'#6b7280'}} axisLine={false} tickLine={false} interval="preserveEnd" />
-                            <YAxis tick={{fontSize:9,fill:'#6b7280'}} axisLine={false} tickLine={false} width={28} domain={[0,100]} />
-                            <Tooltip contentStyle={{background:'#17364F',border:'1px solid rgba(9,216,199,0.3)',borderRadius:8,fontSize:11,fontFamily:'JetBrains Mono'}} />
-                            <Area type="monotone" dataKey="cpu" stroke="#DB0927" fill="url(#gCpu)" strokeWidth={2} name="CPU %" dot={false} />
-                            <Area type="monotone" dataKey="mem" stroke="#09D8C7" fill="url(#gMem)" strokeWidth={2} name="Mem %" dot={false} />
-                        </AreaChart>
-                    </ResponsiveContainer>
-                ) : (<div className="h-[180px] flex items-center justify-center text-gray-600 text-xs font-mono animate-pulse">Collecting metrics data…</div>)}
-            </W>
 
             {/* Live Activity */}
             <W title="Live Activity" badge="WEBSOCKET" className="row-span-2">
@@ -378,14 +335,6 @@ export default function Dashboard() {
                 </div>
             </W>
 
-            {/* AI Brain */}
-            <W title="AI Brain" badge={aiStatus === 'idle' ? 'IDLE' : aiStatus === 'complete' ? '✓ DONE' : '⚡ ANALYZING'}>
-                <div className={`bg-aegis-bg/60 rounded-lg p-4 font-mono text-xs min-h-[120px] max-h-[200px] overflow-y-auto border ${aiStatus !== 'idle' ? 'border-purple-500/30' : 'border-transparent'}`}>
-                    {currentAIText
-                        ? <span className="text-purple-300 whitespace-pre-wrap"><Typewriter text={currentAIText} /></span>
-                        : <span className="text-gray-600 italic">AI engine idle — trigger an incident to see analysis…</span>}
-                </div>
-            </W>
 
             {/* Safety Council */}
             <W title="Safety Council" badge={councilDecision ? (councilDecision.final_verdict === 'APPROVED' ? '✓ APPROVED' : '✗ REJECTED') : 'WAITING'}>
@@ -658,23 +607,34 @@ export default function Dashboard() {
 
             {/* Main */}
             <div className="flex-1 flex flex-col min-w-0">
-                <header className="h-14 bg-aegis-panel/50 backdrop-blur-lg border-b border-white/5 flex items-center justify-between px-6 shrink-0">
-                    <div className="flex items-center gap-4">
-                        <h1 className="text-sm font-bold text-gray-200 tracking-wide">GOD MODE — COMMAND CENTER</h1>
-                        <span className={`flex items-center gap-1.5 text-xs font-mono ${connected?'text-green-400':'text-red-400'}`}>
-                            <span className={`status-dot ${connected?'healthy':'critical'}`} />
-                            {connected ? 'LIVE' : 'OFFLINE'}
-                        </span>
-                        {health && <span className="text-[10px] font-mono text-gray-500">v{health.version} WS:{health.ws_clients}</span>}
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <button onClick={triggerDemo} className="text-[10px] font-mono px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer">⚡ TRIGGER INCIDENT</button>
-                        <button onClick={() => triggerScale('up',2)} className="text-[10px] font-mono px-3 py-1.5 rounded-lg bg-aegis-accent/10 border border-aegis-accent/30 text-aegis-accent hover:bg-aegis-accent/20 active:scale-95 transition-all cursor-pointer">📈 SCALE UP</button>
-                        <span className="text-xs font-mono text-gray-400">{clock.toLocaleTimeString('en-US',{hour12:false})}</span>
-                        <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full bg-aegis-accent/20 border border-aegis-accent/40 flex items-center justify-center text-xs font-bold text-aegis-accent">OP</div>
-                            <span className="hidden md:inline text-xs text-gray-400 font-mono">operator</span>
+                <header className="bg-aegis-panel/50 backdrop-blur-lg border-b border-white/5 flex flex-col shrink-0">
+                    <div className="h-14 flex items-center justify-between px-6">
+                        <div className="flex items-center gap-4">
+                            <h1 className="text-sm font-bold text-gray-200 tracking-wide">GOD MODE — COMMAND CENTER</h1>
+                            <span className={`flex items-center gap-1.5 text-xs font-mono ${connected?'text-green-400':'text-red-400'}`}>
+                                <span className={`status-dot ${connected?'healthy':'critical'}`} />
+                                {connected ? 'LIVE' : 'OFFLINE'}
+                            </span>
+                            {health && <span className="text-[10px] font-mono text-gray-500">v{health.version} WS:{health.ws_clients}</span>}
                         </div>
+                        <div className="flex items-center gap-3">
+                            <button onClick={() => triggerScale('up',2)} className="text-[10px] font-mono px-3 py-1.5 rounded-lg bg-aegis-accent/10 border border-aegis-accent/30 text-aegis-accent hover:bg-aegis-accent/20 active:scale-95 transition-all cursor-pointer">📈 SCALE UP</button>
+                            <span className="text-xs font-mono text-gray-400">{clock.toLocaleTimeString('en-US',{hour12:false})}</span>
+                            <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full bg-aegis-accent/20 border border-aegis-accent/40 flex items-center justify-center text-xs font-bold text-aegis-accent">OP</div>
+                                <span className="hidden md:inline text-xs text-gray-400 font-mono">operator</span>
+                            </div>
+                        </div>
+                    </div>
+                    {/* TRIGGER BUTTONS */}
+                    <div className="px-6 py-3 flex gap-2 items-center flex-wrap border-t border-white/5 bg-black/30">
+                        <span className="text-[10px] font-mono text-gray-500 mr-2">🎯 TRIGGER:</span>
+                        <button onClick={() => triggerIncident('memory_oom')} className="text-[9px] font-mono px-2.5 py-1 rounded bg-red-500/15 border border-red-500/40 text-red-400 hover:bg-red-500/25 active:scale-95 transition-all cursor-pointer">💾 Memory OOM</button>
+                        <button onClick={() => triggerIncident('network_latency')} className="text-[9px] font-mono px-2.5 py-1 rounded bg-cyan-500/15 border border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/25 active:scale-95 transition-all cursor-pointer">🌐 Network</button>
+                        <button onClick={() => triggerIncident('cpu_spike')} className="text-[9px] font-mono px-2.5 py-1 rounded bg-orange-500/15 border border-orange-500/40 text-orange-400 hover:bg-orange-500/25 active:scale-95 transition-all cursor-pointer">⚡ CPU Spike</button>
+                        <button onClick={() => triggerIncident('db_connection')} className="text-[9px] font-mono px-2.5 py-1 rounded bg-blue-500/15 border border-blue-500/40 text-blue-400 hover:bg-blue-500/25 active:scale-95 transition-all cursor-pointer">🗄️ DB Conn</button>
+                        <button onClick={() => triggerIncident('disk_space')} className="text-[9px] font-mono px-2.5 py-1 rounded bg-amber-500/15 border border-amber-500/40 text-amber-400 hover:bg-amber-500/25 active:scale-95 transition-all cursor-pointer">📦 Disk Full</button>
+                        <button onClick={() => triggerIncident('pod_crash')} className="text-[9px] font-mono px-2.5 py-1 rounded bg-pink-500/15 border border-pink-500/40 text-pink-400 hover:bg-pink-500/25 active:scale-95 transition-all cursor-pointer">💥 Pod Crash</button>
                     </div>
                 </header>
                 <main className="flex-1 p-4 overflow-y-auto">

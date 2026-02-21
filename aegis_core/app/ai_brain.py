@@ -16,7 +16,7 @@ Architecture:
   └─────────────────────────────────────────────────────────┘
 
 Primary LLM:  FastRouter (Claude)
-Fallback:     Ollama (local llama3.2)
+Fallback:     Ollama (local llama3.1:8b-instruct)
 RAG Engine:   TF-IDF Vectorizer + Cosine Similarity (zero API calls)
 """
 
@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -78,23 +79,45 @@ def _truncate_logs(raw: str, max_chars: int = LOG_TRUNCATE_CHARS) -> str:
 
 
 def _parse_json(raw: str) -> dict:
-    """Parse JSON from LLM response, stripping markdown fences."""
+    """Parse JSON from LLM response, stripping markdown fences.
+    After parsing, clean all string values to fix LLM text garbling."""
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-    return json.loads(raw)
+    data = json.loads(raw)
+    # Clean all string values in the parsed dict (root_cause, justification, reasoning, etc.)
+    for key, val in data.items():
+        if isinstance(val, str):
+            data[key] = _clean_llm_text(val)
+    return data
 
 
 async def _call_llm(system: str, user_msg: str, model: str | None = None) -> str:
-    """Call LLM with primary → fallback strategy. Returns raw text."""
-    used_model = model or FASTRTR_MODEL
+    """Call LLM with Ollama PRIMARY, FastRouter fallback. Returns raw text."""
+    # Try Ollama first
+    try:
+        client = _get_fallback()  # Ollama client
+        resp = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=OLLAMA_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.2,
+        )
+        raw = resp.choices[0].message.content.strip()
+        logger.debug("Ollama response OK")
+        return raw
+    except Exception as exc:
+        logger.warning("Ollama failed: %s – trying FastRouter (Claude)", exc)
 
-    # Try primary
+    # Fallback to FastRouter (Claude)
     try:
         client = _get_primary()
         resp = await asyncio.to_thread(
             client.chat.completions.create,
-            model=used_model,
+            model=FASTRTR_MODEL,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_msg},
@@ -103,20 +126,8 @@ async def _call_llm(system: str, user_msg: str, model: str | None = None) -> str
         )
         return resp.choices[0].message.content.strip()
     except Exception as exc:
-        logger.warning("Primary LLM failed: %s – trying Ollama fallback", exc)
-
-    # Fallback
-    client = _get_fallback()
-    resp = await asyncio.to_thread(
-        client.chat.completions.create,
-        model=OLLAMA_MODEL,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_msg},
-        ],
-        temperature=0.2,
-    )
-    return resp.choices[0].message.content.strip()
+        logger.error("Both Ollama and FastRouter failed: %s", exc)
+        raise
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -274,31 +285,58 @@ def _format_rag_context(rag_entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _sanitize_text(raw: str) -> str:
+# ═══════════════════════════════════════════════════════════════════════
+# BRUTAL TEXT CLEANER – Character-level deduplication + known fixes
+# ═══════════════════════════════════════════════════════════════════════
+
+def _clean_llm_text(text: str) -> str:
     """
-    Lightweight sanitizer to correct common LLM spelling/formatting issues
-    before persisting or sending to clients. This is intentionally simple
-    (whitelist replacements) so we don't attempt heavy NLP here.
+    AGGRESSIVE text cleaner for LLM output garbling.
+    Works character-by-character and word-level to catch all corruption.
     """
-    if not raw:
-        return raw
-    s = raw
-    replacements = {
-        'Rot Cause': 'Root Cause',
-        'NNtwork': 'Network',
-        'Netwrok': 'Network',
-        'connettivity': 'connectivity',
-        'conectivity': 'connectivity',
-        'Justificatiin': 'Justification',
-        'Justificaton': 'Justification',
-        'uggy-app-v2': 'buggy-app-v2',
-        '\t': ' ',
+    if not text or not isinstance(text, str):
+        return text
+
+    s = text
+
+    # ── PHASE 1: Kill runs of 3+ identical chars (always safe) ──
+    # "killl" → "kill", "sss" → "ss", "aaaa" → "aa"
+    i = 0
+    result = []
+    while i < len(s):
+        char = s[i]
+        count = 1
+        while i + count < len(s) and s[i + count] == char:
+            count += 1
+        # Keep max 2 of the same char
+        result.append(char * min(count, 2))
+        i += count
+    s = "".join(result)
+
+    # ── PHASE 2: Fix obvious doubled-start words ──
+    words_to_fix = {
+        'bbuggy': 'buggy', 'iincident': 'incident', 'mmemory': 'memory',
+        'nnnetwork': 'network', 'kkill': 'kill', 'rrrestart': 'restart',
+        'ssscale': 'scale', 'ppprocess': 'process', 'rrestart': 'restart',
+        'nneed': 'need', 'ccritical': 'critical',
     }
-    for k, v in replacements.items():
-        s = s.replace(k, v)
-    # basic whitespace normalisation
-    s = ' '.join(s.split())
-    return s
+    for bad, good in words_to_fix.items():
+        s = s.replace(bad, good)
+
+    # ── PHASE 3: Fix common missing spaces ──
+    fixes = {
+        'issnecessary': 'is necessary',
+        'toorestore': 'to restore',
+        'torestore': 'to restore',
+        'nnnecessary': 'necessary',
+    }
+    for bad, good in fixes.items():
+        s = s.replace(bad, good)
+
+    # ── PHASE 4: Normalize multi-spaces ──
+    s = re.sub(r' {2,}', ' ', s)
+
+    return s.strip()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -373,13 +411,12 @@ async def stream_analysis(payload: IncidentPayload) -> AsyncGenerator[str, None]
         f"Logs (last {LOG_TRUNCATE_CHARS} chars):\n{safe_logs}"
     )
 
-    try:
-        client = _get_primary()
-        model = FASTRTR_MODEL
-    except Exception:
-        client = _get_fallback()
-        model = OLLAMA_MODEL
+    # Use FastRouter (Claude) ONLY for MVP
+    client = _get_primary()
+    model = FASTRTR_MODEL
 
+    # Buffer all chunks, clean EACH chunk, then combine and yield char-by-char
+    raw_chunks: list[str] = []
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -393,12 +430,19 @@ async def stream_analysis(payload: IncidentPayload) -> AsyncGenerator[str, None]
         )
         for chunk in response:
             if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    except Exception:
+                # Clean each chunk IMMEDIATELY before buffering
+                cleaned_chunk = _clean_llm_text(chunk.choices[0].delta.content)
+                raw_chunks.append(cleaned_chunk)
+    except Exception as exc:
         # Non-streaming fallback
+        logger.error("FastRouter streaming failed: %s", exc)
         raw = await _call_llm(system_prompt, user_msg)
-        for char in raw:
-            yield char
+        raw_chunks.append(raw)
+
+    # Final aggressive clean of the full text
+    cleaned = _clean_llm_text("".join(raw_chunks))
+    for char in cleaned:
+        yield char
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -456,8 +500,8 @@ async def analyze_logs(payload: IncidentPayload) -> AIAnalysis:
         analysis.confidence = float(0.0)
 
     # Sanitize free-text fields to correct common misspellings/formatting
-    analysis.root_cause = _sanitize_text(getattr(analysis, 'root_cause', '') or '')
-    analysis.justification = _sanitize_text(getattr(analysis, 'justification', '') or '')
+    analysis.root_cause = _clean_llm_text(getattr(analysis, 'root_cause', '') or '')
+    analysis.justification = _clean_llm_text(getattr(analysis, 'justification', '') or '')
 
     rag_tag = f" (RAG: {len(rag_entries)} entries)" if rag_entries else " (cold start)"
     logger.info(
@@ -511,7 +555,7 @@ async def council_review(
         sec_vote = CouncilVote(
             role=CouncilRole.SECURITY_OFFICER,
             verdict=CouncilVerdict(sec_data.get("verdict", "APPROVED")),
-            reasoning=sec_data.get("reasoning", "No issues found"),
+            reasoning=_clean_llm_text(sec_data.get("reasoning", "No issues found")),
         )
     except Exception as exc:
         logger.warning("Security agent failed: %s – auto-approving", exc)
@@ -530,7 +574,7 @@ async def council_review(
         aud_vote = CouncilVote(
             role=CouncilRole.AUDITOR,
             verdict=CouncilVerdict(aud_data.get("verdict", "APPROVED")),
-            reasoning=aud_data.get("reasoning", "Logged for compliance"),
+            reasoning=_clean_llm_text(aud_data.get("reasoning", "Logged for compliance")),
         )
     except Exception as exc:
         logger.warning("Auditor agent failed: %s – auto-approving", exc)
