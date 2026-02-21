@@ -137,13 +137,22 @@ class WSFrame(BaseModel):
     timestamp: str = Field(default_factory=lambda: _dt.datetime.utcnow().isoformat())
 
 
-# ── Runbook entry ────────────────────────────────────────────────────
+# ── Runbook entry (RAG knowledge base) ───────────────────────────────
 class RunbookEntry(BaseModel):
+    """
+    Each resolved incident is saved with FULL context so the TF-IDF
+    vectorizer can build rich similarity scores for future retrieval.
+    Fields: logs, container_name, severity feed the RAG corpus.
+    """
     incident_id: str
     alert_type: str
+    logs: str = ""                                  # ← raw logs for TF-IDF
+    container_name: str = "unknown"                 # ← container context
+    severity: str = "UNKNOWN"                       # ← severity context
     root_cause: str
     action: str
     justification: str
+    confidence: float = 0.85                        # ← LLM confidence at resolution
     council_approved: bool = True
     replicas_used: int = 0
     resolved_at: str = Field(

@@ -1,5 +1,11 @@
 """
 AegisOps GOD MODE – Post-action verification loop & runbook learning.
+
+The runbook (runbook.json) is the RAG knowledge base:
+  • Every resolved incident saves: logs, root_cause, action, justification
+  • On the next incident, TF-IDF retrieves the most similar past entries
+  • Those entries get injected into the LLM system prompt
+  • The LLM produces better diagnoses over time → recursive self-improvement
 """
 
 from __future__ import annotations
@@ -48,12 +54,24 @@ async def append_to_runbook(
     replicas_used: int = 0,
     path: Path = RUNBOOK_PATH,
 ) -> None:
+    """
+    Save resolved incident to runbook.json for RAG retrieval.
+
+    CRITICAL: We save the raw logs, container_name, severity alongside
+    root_cause/action/justification so the TF-IDF vectorizer can build
+    rich similarity scores on the NEXT incident. This is the "learning"
+    side of the recursive loop.
+    """
     entry = RunbookEntry(
         incident_id=payload.incident_id,
         alert_type=payload.alert_type,
+        logs=payload.logs,                                   # ← FULL logs for RAG
+        container_name=payload.container_name or "unknown",  # ← container context
+        severity=payload.severity or "UNKNOWN",              # ← severity context
         root_cause=analysis.root_cause,
         action=analysis.action.value,
         justification=analysis.justification,
+        confidence=analysis.confidence,                      # ← model confidence
         council_approved=council_approved,
         replicas_used=replicas_used,
     )
@@ -71,6 +89,10 @@ async def append_to_runbook(
             data = []
         data.append(entry.model_dump())
         path.write_text(json.dumps(data, indent=2) + "\n")
-        logger.info("📒 Runbook updated – %d entries.", len(data))
+        logger.info(
+            "📒 Runbook updated – %d entries total. RAG corpus growing. "
+            "(sabka sath, sabka vikas 🚀)",
+            len(data),
+        )
 
     await asyncio.to_thread(_write)

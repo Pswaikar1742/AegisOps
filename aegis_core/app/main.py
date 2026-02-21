@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .ai_brain import analyze_logs, council_review, stream_analysis
+from .ai_brain import get_relevant_runbook_entries, _load_runbook
 from .docker_ops import (
     restart_container, get_container_logs, list_running_containers,
     get_all_metrics, scale_up, scale_down, reconfigure_nginx,
@@ -95,22 +96,47 @@ def _timeline(result: IncidentResult, status: str, msg: str, agent: str | None =
 # ── GOD MODE Remediation Pipeline ───────────────────────────────────
 async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
     """
-    Full God Mode pipeline:
-      1. AI Analysis (SRE Agent)
+    Full God Mode RAG pipeline:
+      0. RAG Retrieval (TF-IDF similarity on runbook.json)
+      1. AI Analysis (SRE Agent, RAG-augmented system prompt)
       2. Multi-Agent Council Review
       3. Execute action (restart OR scale-up)
       4. Nginx LB reconfiguration (if scaled)
       5. Health verification
-      6. Runbook learning
+      6. Runbook learning (save for future RAG)
     """
     iid = payload.incident_id
 
-    # ── 1. AI Analysis with streaming ────────────────────────────────
+    # ── 0. RAG Retrieval — broadcast to UI ───────────────────────────
+    import asyncio as _aio
+    from .ai_brain import get_relevant_runbook_entries as _rag_retrieve
+
+    rag_entries = await _aio.to_thread(_rag_retrieve, payload.logs)
+    if rag_entries:
+        _timeline(result, "RAG_RETRIEVAL",
+                  f"📚 Retrieved {len(rag_entries)} similar past incidents "
+                  f"(best match: {rag_entries[0]['similarity_score']:.1%})",
+                  "RAG_ENGINE")
+        await ws.broadcast_raw(WSFrameType.AI_THINKING, data={
+            "incident_id": iid,
+            "message": f"📚 RAG: Found {len(rag_entries)} similar past incidents. "
+                       f"Injecting runbook knowledge into AI prompt…"
+        }, incident_id=iid)
+    else:
+        _timeline(result, "RAG_RETRIEVAL",
+                  "📚 Cold start – no prior incidents in runbook yet.",
+                  "RAG_ENGINE")
+        await ws.broadcast_raw(WSFrameType.AI_THINKING, data={
+            "incident_id": iid,
+            "message": "📚 RAG: Cold start – reasoning from first principles…"
+        }, incident_id=iid)
+
+    # ── 1. AI Analysis with streaming (RAG-augmented) ────────────────
     result.status = ResolutionStatus.ANALYSING
     _timeline(result, "ANALYSING", "AI SRE Agent is analysing the incident…", "SRE_AGENT")
     await ws.broadcast_raw(WSFrameType.STATUS_UPDATE, data={
         "incident_id": iid, "status": "ANALYSING",
-        "message": "🧠 AI SRE Agent is analysing…"
+        "message": "🧠 AI SRE Agent is analysing (RAG-augmented)…"
     }, incident_id=iid)
 
     # Stream thinking tokens to UI
@@ -427,6 +453,27 @@ async def topology():
             edges.append({"from": n["id"], "to": "buggy-app-v2", "label": "routes"})
 
     return {"nodes": nodes, "edges": edges}
+
+
+@app.get("/runbook")
+async def runbook():
+    """Return the full runbook knowledge base (RAG corpus)."""
+    entries = _load_runbook()
+    return {"entries": entries, "total": len(entries)}
+
+
+@app.get("/rag/test")
+async def rag_test(logs: str = "CPU usage at 98% infinite loop"):
+    """
+    Test the RAG retrieval engine.
+    Pass ?logs=<text> and see which past incidents are most similar.
+    """
+    results = get_relevant_runbook_entries(logs)
+    return {
+        "query": logs,
+        "retrieved": results,
+        "count": len(results),
+    }
 
 
 # ── WebSocket endpoint ───────────────────────────────────────────────
