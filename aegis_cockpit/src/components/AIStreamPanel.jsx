@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiTerminal, FiCpu, FiAlertTriangle } from 'react-icons/fi';
+import { sanitizeText } from '../utils/textSanitize';
 
 /**
  * AI Stream Panel – The "movie hacker" typewriter effect.
@@ -32,9 +33,9 @@ export default function AIStreamPanel({ messages }) {
       const analysis = msg.data?.analysis;
       if (analysis) {
         setLogs((prev) => [...prev.slice(-50),
-          { ts: msg.timestamp, type: 'ROOT_CAUSE', text: analysis.root_cause, color: 'text-aegis-warn' },
-          { ts: msg.timestamp, type: 'ACTION', text: `${analysis.action} (${(analysis.confidence * 100).toFixed(0)}% confident)`, color: 'text-aegis-accent' },
-          { ts: msg.timestamp, type: 'REASON', text: analysis.justification, color: 'text-gray-400' },
+          { ts: msg.timestamp, type: 'ROOT_CAUSE', text: sanitizeText(analysis.root_cause), color: 'text-aegis-warn' },
+          { ts: msg.timestamp, type: 'ACTION', text: `${analysis.action} (${(Math.max(0, Math.min(1, Number(analysis.confidence)||0))*100).toFixed(0)}% confidence)`, color: 'text-aegis-accent' },
+          { ts: msg.timestamp, type: 'REASONING', text: sanitizeText(analysis.justification), color: 'text-gray-400' },
         ]);
       }
     } else if (msg.type === 'council.vote') {
@@ -115,15 +116,26 @@ export default function AIStreamPanel({ messages }) {
           ))}
         </AnimatePresence>
 
-        {/* Streaming typewriter text */}
+        {/* Streaming typewriter text - BRIGHT GREEN/CYAN WITH TYPEWRITER EFFECT */}
         {isThinking && streamText && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="mt-2 p-2 bg-black/40 rounded border border-aegis-accent/20"
+            className="mt-2 p-3 bg-black/80 rounded border-2 border-cyan-500/40 typewriter-stream"
           >
-            <span className="text-aegis-accent">{streamText}</span>
-            <span className="typewriter-cursor" />
+            {sanitizeText(streamText).split('').map((char, i) => (
+              <span
+                key={i}
+                className="inline-block bright-cyan"
+                style={{
+                  animation: `typewriter 0.03s ease-out ${i * 0.03}s forwards`,
+                  opacity: 0,
+                }}
+              >
+                {char}
+              </span>
+            ))}
+            <span className="ml-1 inline-block animate-pulse text-cyan-400">▊</span>
           </motion.div>
         )}
       </div>

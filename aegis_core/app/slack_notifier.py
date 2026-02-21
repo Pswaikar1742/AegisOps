@@ -61,7 +61,7 @@ async def notify(
         blocks.append({
             "type": "section",
             "fields": [
-                {"type": "mrkdwn", "text": f"*Root Cause:*\n{analysis.root_cause}"},
+                {"type": "mrkdwn", "text": f"*Root Cause Analysis:*\n{analysis.root_cause}"},
                 {"type": "mrkdwn", "text": f"*Action:*\n`{analysis.action.value}` (conf: {analysis.confidence:.0%})"},
             ],
         })

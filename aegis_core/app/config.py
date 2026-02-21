@@ -21,8 +21,8 @@ FASTRTR_MODEL: str = os.getenv("FASTRTR_MODEL", "anthropic/claude-sonnet-4-20250
 LOG_TRUNCATE_CHARS: int = int(os.getenv("LOG_TRUNCATE_CHARS", "2000"))
 
 # ── Ollama local fallback ────────────────────────────────────────────
-OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.2:latest")
+OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434/v1")
+OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b-instruct-q4_K_M")
 
 # ── Docker target ────────────────────────────────────────────────────
 TARGET_CONTAINER: str = os.getenv("TARGET_CONTAINER", "buggy-app-v2")

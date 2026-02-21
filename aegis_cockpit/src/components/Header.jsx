@@ -43,11 +43,12 @@ export default function Header({ connected, health, incidentCount }) {
       {/* Right: Connection */}
       <div className="flex items-center gap-4">
         <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono ${
-          connected ? 'bg-aegis-accent/10 text-aegis-accent border border-aegis-accent/30' 
+          connected ? 'bg-green-900/30 text-green-300 border border-green-600/50' 
                     : 'bg-red-500/10 text-red-400 border border-red-500/30'
         }`}>
-          {connected ? <FiWifi className="text-sm" /> : <FiWifiOff className="text-sm animate-pulse" />}
-          {connected ? 'LIVE' : 'OFFLINE'}
+          <span className="heartbeat" />
+          {connected ? 'SYSTEM ONLINE' : 'SYSTEM OFFLINE'}
+        </div>
         </div>
         <div className="text-[10px] text-gray-600 font-mono">
           {new Date().toISOString().slice(11, 19)}Z

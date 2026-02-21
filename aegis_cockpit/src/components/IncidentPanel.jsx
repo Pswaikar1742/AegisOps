@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { sanitizeText } from '../utils/textSanitize';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiAlertCircle, FiCheckCircle, FiXCircle, FiClock, FiChevronDown, FiChevronUp, FiShield } from 'react-icons/fi';
 
@@ -12,6 +13,7 @@ const STATUS_CONFIG = {
   VERIFYING: { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', icon: FiClock, label: 'Verifying' },
   RESOLVED: { color: 'text-aegis-accent', bg: 'bg-green-500/10', border: 'border-green-500/30', icon: FiCheckCircle, label: 'Resolved' },
   FAILED: { color: 'text-aegis-danger', bg: 'bg-red-500/10', border: 'border-red-500/30', icon: FiXCircle, label: 'Failed' },
+  CRITICAL: { color: 'red-alert-text', bg: 'bg-red-500/15', border: 'border-red-500/50', icon: FiAlertCircle, label: 'CRITICAL' },
 };
 
 function StatusBadge({ status }) {
@@ -122,6 +124,7 @@ export default function IncidentPanel({ incidents }) {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 className={`rounded-lg border cursor-pointer ${
+                  inc.severity === 'CRITICAL' ? 'red-alert-bg border-red-500/50' :
                   inc.status === 'FAILED' ? 'border-aegis-danger/30 bg-red-900/5' :
                   inc.status === 'RESOLVED' ? 'border-aegis-accent/20 bg-green-900/5' :
                   'border-aegis-border bg-black/20'
@@ -138,8 +141,8 @@ export default function IncidentPanel({ incidents }) {
                     <div className="text-[10px] text-gray-500">{inc.alert_type}</div>
                   </div>
                   {inc.replicas_spawned > 0 && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-aegis-purple/20 text-aegis-purple">
-                      ×{inc.replicas_spawned} replicas
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-aegis-purple/20 text-aegis-purple animate-pulse">
+                      ✦ ×{inc.replicas_spawned} replicas
                     </span>
                   )}
                   {isExpanded ? <FiChevronUp className="text-gray-500" /> : <FiChevronDown className="text-gray-500" />}
@@ -158,9 +161,10 @@ export default function IncidentPanel({ incidents }) {
                         {/* Analysis */}
                         {inc.analysis && (
                           <div className="mt-2 p-2 rounded bg-black/30 text-xs space-y-1">
-                            <div><span className="text-gray-500">Root Cause:</span> <span className="text-aegis-warn">{inc.analysis.root_cause}</span></div>
-                            <div><span className="text-gray-500">Action:</span> <span className="text-aegis-accent font-mono">{inc.analysis.action}</span></div>
-                            <div><span className="text-gray-500">Confidence:</span> <span className="text-gray-300">{(inc.analysis.confidence * 100).toFixed(0)}%</span></div>
+                            <div><span className="text-gray-500">Root Cause:</span> <span className="text-aegis-warn">{sanitizeText(inc.analysis.root_cause)}</span></div>
+                            <div><span className="text-gray-500">Recommended Action:</span> <span className="text-aegis-accent font-mono">{inc.analysis.action}</span></div>
+                            <div><span className="text-gray-500">Confidence Level:</span> <span className="text-gray-300">{(Math.max(0, Math.min(1, Number(inc.analysis.confidence)||0)) * 100).toFixed(0)}%</span></div>
+                            <div><span className="text-gray-500">Reasoning:</span> <span className="text-gray-400">{sanitizeText(inc.analysis.justification)}</span></div>
                           </div>
                         )}
 
@@ -169,6 +173,24 @@ export default function IncidentPanel({ incidents }) {
 
                         {/* Timeline */}
                         <TimelineView timeline={inc.timeline} />
+
+                        {/* Scale Visualizer */}
+                        {inc.replicas_spawned > 0 && (
+                          <div className="mt-3 p-2 rounded bg-aegis-purple/5 border border-aegis-purple/20">
+                            <div className="text-[10px] text-aegis-purple mb-2 font-mono">SCALE VISUALIZER</div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {Array.from({ length: inc.replicas_spawned }).map((_, idx) => (
+                                <div 
+                                  key={idx} 
+                                  className="replica-box aspect-square flex items-center justify-center text-[9px]"
+                                  style={{ animationDelay: `${idx * 0.1}s` }}
+                                >
+                                  <span className="text-center text-bright-cyan">R{idx + 1}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Error */}
                         {inc.error && (

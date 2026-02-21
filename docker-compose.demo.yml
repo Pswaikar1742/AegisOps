@@ -1,0 +1,157 @@
+version: '3.9'
+
+services:
+  # ===== Core Agent (AI/RAG/Decision Engine) =====
+  aegis-agent:
+    build:
+      context: ./aegis_core
+      dockerfile: Dockerfile
+    container_name: aegis-agent
+    environment:
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"  # Local Ollama
+      POSTGRES_HOST: "aegis-agent"
+      LOG_LEVEL: "INFO"
+    ports:
+      - "8001:8001"
+    networks:
+      - aegis-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    labels:
+      - "com.example.demo=true"
+
+  # ===== Frontend Cockpit (React SPA) =====
+  aegis-cockpit:
+    build:
+      context: ./aegis_cockpit
+      dockerfile: Dockerfile
+    container_name: aegis-cockpit
+    ports:
+      - "3000:3000"
+    networks:
+      - aegis-net
+    depends_on:
+      aegis-agent:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    labels:
+      - "com.example.demo=true"
+
+  # ===== Dashboard (Streamlit) =====
+  aegis-dashboard:
+    build:
+      context: ./aegis_dashboard
+      dockerfile: Dockerfile
+    container_name: aegis-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      STREAMLIT_SERVER_PORT: 8501
+      STREAMLIT_SERVER_ADDRESS: "0.0.0.0"
+    networks:
+      - aegis-net
+    depends_on:
+      aegis-agent:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "com.example.demo=true"
+
+  # ===== Load Balancer (nginx) =====
+  aegis-lb:
+    build:
+      context: ./aegis_lb
+      dockerfile: Dockerfile
+    container_name: aegis-lb
+    ports:
+      - "80:80"
+    networks:
+      - aegis-net
+    depends_on:
+      - buggy-app-v2
+    restart: unless-stopped
+    labels:
+      - "com.example.demo=true"
+
+  # ===== Buggy App (Demo Target) =====
+  buggy-app-v2:
+    image: python:3.11-slim
+    container_name: buggy-app-v2
+    command: >
+      bash -c "pip install flask requests -q &&
+      python -c \"
+import os, time, threading, random
+from flask import Flask, jsonify, request
+app = Flask(__name__)
+memory_leak = []
+cpu_intensive = False
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy', 'timestamp': time.time()})
+
+@app.route('/metrics')
+def metrics():
+    return jsonify({
+        'cpu_usage': f'{random.uniform(10, 90):.1f}%',
+        'memory_usage': f'{len(memory_leak) * 0.1:.1f}MB',
+        'requests': random.randint(100, 1000)
+    })
+
+@app.route('/leak')
+def leak():
+    memory_leak.extend([0] * 1000000)
+    return jsonify({'leaked': len(memory_leak)})
+
+@app.route('/cpu')
+def cpu():
+    global cpu_intensive
+    cpu_intensive = True
+    return jsonify({'cpu_spiking': True})
+
+def cpu_burn():
+    while True:
+        if cpu_intensive:
+            sum([i**2 for i in range(100000)])
+        time.sleep(0.01)
+
+threading.Thread(target=cpu_burn, daemon=True).start()
+app.run(host='0.0.0.0', port=8000, threaded=True)
+\""
+    ports:
+      - "8000:8000"
+    networks:
+      - aegis-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    labels:
+      - "com.example.demo=true"
+
+networks:
+  aegis-net:
+    driver: bridge
+
+volumes:
+  ollama-data:
+    driver: local
