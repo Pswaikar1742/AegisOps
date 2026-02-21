@@ -173,3 +173,112 @@
   border-radius: 0 4px 4px 0;
   box-shadow: 0 0 10px rgba(9, 216, 199, 0.5);
 }
+
+/* ── HEARTBEAT ANIMATION (System Online) ────── */
+.heartbeat {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0f0;
+  display: inline-block;
+  margin-right: 6px;
+  animation: pulse-heartbeat 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7);
+}
+
+@keyframes pulse-heartbeat {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(0, 255, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 0, 0);
+  }
+}
+
+/* ── TYPEWRITER EFFECT (AI Stream) ──────────── */
+.typewriter-stream {
+  font-family: 'Fira Code', 'Courier New', monospace;
+  color: #0f0;
+  background: #000;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.6;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+}
+
+.typewriter-text {
+  animation: typewriter 0.03s steps(1, end) forwards;
+}
+
+@keyframes typewriter {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+/* ── SCALE POP ANIMATION (Replicas) ────────── */
+.replica-box {
+  border: 2px solid #09D8C7;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+  background: rgba(9, 216, 199, 0.1);
+  font-weight: 600;
+  color: #0f0;
+  animation: pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ── RED ALERT MODE (Critical Incident) ────── */
+.red-alert-bg {
+  animation: red-pulse 1.5s ease-in-out infinite;
+  border: 2px solid #DB0927;
+}
+
+@keyframes red-pulse {
+  0% {
+    background: rgba(219, 9, 39, 0.08);
+    box-shadow: 0 0 0 0 rgba(219, 9, 39, 0.4);
+  }
+  50% {
+    background: rgba(219, 9, 39, 0.15);
+    box-shadow: 0 0 0 4px rgba(219, 9, 39, 0.2);
+  }
+  100% {
+    background: rgba(219, 9, 39, 0.08);
+    box-shadow: 0 0 0 0 rgba(219, 9, 39, 0.4);
+  }
+}
+
+.red-alert-text {
+  color: #DB0927;
+  text-shadow: 0 0 10px rgba(219, 9, 39, 0.6);
+  animation: blink-alert 1s step-end infinite;
+}
+
+@keyframes blink-alert {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.7; }
+}
+
+/* ── BRIGHT CYAN ACCENT ────────────────────── */
+.bright-cyan {
+  color: #0ff;
+  text-shadow: 0 0 10px rgba(0, 255, 255, 0.6), 0 0 20px rgba(0, 255, 255, 0.3);
+}

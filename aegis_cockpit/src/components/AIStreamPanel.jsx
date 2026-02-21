@@ -116,15 +116,26 @@ export default function AIStreamPanel({ messages }) {
           ))}
         </AnimatePresence>
 
-        {/* Streaming typewriter text */}
+        {/* Streaming typewriter text - BRIGHT GREEN/CYAN WITH TYPEWRITER EFFECT */}
         {isThinking && streamText && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="mt-2 p-2 bg-black/40 rounded border border-aegis-accent/20"
+            className="mt-2 p-3 bg-black/80 rounded border-2 border-cyan-500/40 typewriter-stream"
           >
-            <span className="text-aegis-accent">{streamText}</span>
-            <span className="typewriter-cursor" />
+            {streamText.split('').map((char, i) => (
+              <span
+                key={i}
+                className="inline-block bright-cyan"
+                style={{
+                  animation: `typewriter 0.03s ease-out ${i * 0.03}s forwards`,
+                  opacity: 0,
+                }}
+              >
+                {char}
+              </span>
+            ))}
+            <span className="animate-pulse text-cyan-400">▊</span>
           </motion.div>
         )}
       </div>
