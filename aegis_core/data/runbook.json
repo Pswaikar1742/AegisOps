@@ -40,5 +40,19 @@
     "council_approved": true,
     "replicas_used": 0,
     "resolved_at": "2026-02-21T17:15:09.801718"
+  },
+  {
+    "incident_id": "INC-MLWNM28P",
+    "alert_type": "Network Timeout",
+    "logs": "Network Timeout detected. Usage critical. Container INC-MLWNM28P nearing limits. Immediate action required.",
+    "container_name": "buggy-app-v2",
+    "severity": "MEDIUM",
+    "root_cause": "Network connectivity issues causing timeout errors in buggy-app-v2",
+    "action": "RESTART",
+    "justification": "Network timeouts typically indicate connectivity or service binding issues that are resolved by restarting the container to re-establish network connections",
+    "confidence": 0.8,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T18:30:48.175180"
   }
 ]

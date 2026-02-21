@@ -274,6 +274,33 @@ def _format_rag_context(rag_entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _sanitize_text(raw: str) -> str:
+    """
+    Lightweight sanitizer to correct common LLM spelling/formatting issues
+    before persisting or sending to clients. This is intentionally simple
+    (whitelist replacements) so we don't attempt heavy NLP here.
+    """
+    if not raw:
+        return raw
+    s = raw
+    replacements = {
+        'Rot Cause': 'Root Cause',
+        'NNtwork': 'Network',
+        'Netwrok': 'Network',
+        'connettivity': 'connectivity',
+        'conectivity': 'connectivity',
+        'Justificatiin': 'Justification',
+        'Justificaton': 'Justification',
+        'uggy-app-v2': 'buggy-app-v2',
+        '\t': ' ',
+    }
+    for k, v in replacements.items():
+        s = s.replace(k, v)
+    # basic whitespace normalisation
+    s = ' '.join(s.split())
+    return s
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # ② RAG-AUGMENTED SYSTEM PROMPTS
 # ═══════════════════════════════════════════════════════════════════════
@@ -411,6 +438,26 @@ async def analyze_logs(payload: IncidentPayload) -> AIAnalysis:
     raw = await _call_llm(system_prompt, user_msg)
     data = _parse_json(raw)
     analysis = AIAnalysis(**data)
+
+    # Normalize confidence to 0.0-1.0 range in case the LLM returned
+    # an absolute or percentage-like number (e.g. 80, 800). Heuristics:
+    # - If confidence > 1 and <= 100, assume percentage and divide by 100
+    # - If confidence > 100 and <= 1000, assume per-mille and divide by 1000
+    # - Otherwise clamp to [0,1]
+    try:
+        conf = float(analysis.confidence)
+        if conf > 1.0 and conf <= 100.0:
+            conf = conf / 100.0
+        elif conf > 100.0 and conf <= 1000.0:
+            conf = conf / 1000.0
+        conf = max(0.0, min(1.0, conf))
+        analysis.confidence = conf
+    except Exception:
+        analysis.confidence = float(0.0)
+
+    # Sanitize free-text fields to correct common misspellings/formatting
+    analysis.root_cause = _sanitize_text(getattr(analysis, 'root_cause', '') or '')
+    analysis.justification = _sanitize_text(getattr(analysis, 'justification', '') or '')
 
     rag_tag = f" (RAG: {len(rag_entries)} entries)" if rag_entries else " (cold start)"
     logger.info(

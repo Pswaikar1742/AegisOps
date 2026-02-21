@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiTerminal, FiCpu, FiAlertTriangle } from 'react-icons/fi';
+import { sanitizeText } from '../utils/textSanitize';
 
 /**
  * AI Stream Panel – The "movie hacker" typewriter effect.
@@ -32,9 +33,9 @@ export default function AIStreamPanel({ messages }) {
       const analysis = msg.data?.analysis;
       if (analysis) {
         setLogs((prev) => [...prev.slice(-50),
-          { ts: msg.timestamp, type: 'ROOT_CAUSE', text: analysis.root_cause, color: 'text-aegis-warn' },
-          { ts: msg.timestamp, type: 'ACTION', text: `${analysis.action} (${(analysis.confidence * 100).toFixed(0)}% confident)`, color: 'text-aegis-accent' },
-          { ts: msg.timestamp, type: 'REASON', text: analysis.justification, color: 'text-gray-400' },
+          { ts: msg.timestamp, type: 'ROOT_CAUSE', text: sanitizeText(analysis.root_cause), color: 'text-aegis-warn' },
+          { ts: msg.timestamp, type: 'ACTION', text: `${analysis.action} (${(Math.max(0, Math.min(1, Number(analysis.confidence)||0))*100).toFixed(0)}% confident)`, color: 'text-aegis-accent' },
+          { ts: msg.timestamp, type: 'REASON', text: sanitizeText(analysis.justification), color: 'text-gray-400' },
         ]);
       }
     } else if (msg.type === 'council.vote') {

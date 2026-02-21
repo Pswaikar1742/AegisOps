@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useApi } from '../hooks/useApi';
+import { sanitizeText } from '../utils/textSanitize';
 
 /* ═══════════════════════════════════════════════
    AEGISOPS GOD-MODE DASHBOARD v3 — PRO MAX
@@ -41,7 +42,7 @@ function extractMsg(type, data) {
         case 'status.update':    return data.message || data.status || '';
         case 'ai.thinking':      return data.message || data.content || '🧠 Thinking…';
         case 'ai.stream':        return data.chunk || data.content || '';
-        case 'ai.complete':      return data.analysis ? `✅ ${data.analysis.root_cause} → ${data.analysis.action}` : (data.message || 'Analysis complete');
+        case 'ai.complete':      return data.analysis ? `✅ ${sanitizeText(data.analysis.root_cause)} → ${data.analysis.action}` : (data.message || 'Analysis complete');
         case 'council.vote':     return data.vote ? `${data.vote.role}: ${data.vote.verdict} — ${(data.vote.reasoning||'').slice(0,80)}` : JSON.stringify(data).slice(0,100);
         case 'council.decision': return data.decision ? `${data.decision.final_verdict}: ${data.decision.summary||''}` : JSON.stringify(data).slice(0,100);
         case 'docker.action':    return `🐳 ${data.action} → ${data.container || ''}`;
@@ -193,7 +194,7 @@ export default function Dashboard() {
             case 'ai.complete':
                 /* Backend sends: { analysis: { root_cause, action, ... } } */
                 setCurrentAIText(data?.analysis
-                    ? `Root Cause: ${data.analysis.root_cause}\nAction: ${data.analysis.action}\nConfidence: ${(data.analysis.confidence*100).toFixed(0)}%\nJustification: ${data.analysis.justification||''}`
+                    ? sanitizeText(`Root Cause: ${data.analysis.root_cause}\nAction: ${data.analysis.action}\nConfidence: ${(Math.max(0, Math.min(1, Number(data.analysis.confidence)||0))*100).toFixed(0)}%\nJustification: ${data.analysis.justification||''}`)
                     : (data?.message || 'Analysis complete'));
                 setAiStatus('complete');
                 break;
