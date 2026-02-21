@@ -42,6 +42,7 @@ trigger_incident() {
                 -H "Content-Type: application/json" \
                 -d '{
                     "incident_id": "DEMO-NET-'$(date +%s)'",
+                    "alert_type": "Network Connectivity",
                     "title": "Network: 95% Packet Loss on Production LB",
                     "severity": "critical",
                     "source": "monitoring-system",
@@ -63,6 +64,7 @@ trigger_incident() {
                 -H "Content-Type: application/json" \
                 -d '{
                     "incident_id": "DEMO-MEM-'$(date +%s)'",
+                    "alert_type": "Memory Leak",
                     "title": "Container Memory: Leak detected (98% usage)",
                     "severity": "critical",
                     "source": "container-runtime",
@@ -83,6 +85,7 @@ trigger_incident() {
                 -H "Content-Type: application/json" \
                 -d '{
                     "incident_id": "DEMO-CPU-'$(date +%s)'",
+                    "alert_type": "CPU Spike",
                     "title": "Performance: CPU at 92% (runaway loop detected)",
                     "severity": "high",
                     "source": "kubernetes-metrics",
@@ -103,6 +106,7 @@ trigger_incident() {
                 -H "Content-Type: application/json" \
                 -d '{
                     "incident_id": "DEMO-DB-'$(date +%s)'",
+                    "alert_type": "Database Pool Exhaustion",
                     "title": "Database: Connection pool at capacity (100/100)",
                     "severity": "critical",
                     "source": "database-monitor",
@@ -124,6 +128,7 @@ trigger_incident() {
                 -H "Content-Type: application/json" \
                 -d '{
                     "incident_id": "DEMO-DISK-'$(date +%s)'",
+                    "alert_type": "Disk Space Critical",
                     "title": "Storage: Disk space critical (5% free on /data)",
                     "severity": "critical",
                     "source": "host-monitor",
