@@ -8,28 +8,6 @@
 
 > **God Mode Activated.** An autonomous, multi-agent AI system that detects, diagnoses, and remediates cloud infrastructure incidents in real-time — with a stunning NASA-style cockpit UI.
 
----
-
-## 🎬 Live Demo (30 seconds)
-
-```bash
-# 1. Start everything
-docker compose up -d
-
-# 2. Open the cockpit
-xdg-open http://localhost:3000
-
-# 3. Trigger all 5 incident types
-bash scripts/trigger-all-incidents.sh http://localhost:8001 demo
-
-# 4. Watch 3 terminals
-docker logs -f aegis-agent 2>&1 | grep --color -E "RESOLVED|APPROVED|RESTART|ERROR|webhook|council|ollama"
-docker stats --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
-watch -n 2 'curl -s http://localhost:8001/incidents | python3 -m json.tool | grep -E "incident_id|status|action|confidence" | head -40'
-```
-
----
-
 ## 🏗️ Architecture
 
 ```
@@ -40,23 +18,23 @@ watch -n 2 'curl -s http://localhost:8001/incidents | python3 -m json.tool | gre
 │  │ React Cockpit│◄────────────────►│   FastAPI Agent         │  │
 │  │  :3000       │    REST /api/*   │   :8001                 │  │
 │  │  (nginx SPA) │                  │                         │  │
-│  └──────────────┘                  │  ┌─────────────────┐   │  │
-│                                    │  │  AI Brain        │   │  │
-│  ┌──────────────┐                  │  │  Ollama PRIMARY  │   │  │
-│  │  Nginx LB    │◄────────────────►│  │  Claude FALLBACK │   │  │
-│  │  :80         │                  │  └─────────────────┘   │  │
+│  └──────────────┘                  │  ┌─────────────────┐    │  │
+│                                    │  │  AI Brain       │    │  │
+│  ┌──────────────┐                  │  │  Ollama PRIMARY │    │  │
+│  │  Nginx LB    │◄────────────────►│  │  Claude FALLBACK│    │  │
+│  │  :80         │                  │  └─────────────────┘    │  │
 │  └──────────────┘                  │                         │  │
-│                                    │  ┌─────────────────┐   │  │
-│  ┌──────────────┐                  │  │ Safety Council   │   │  │
-│  │ buggy-app-v2 │◄────────────────►│  │ SRE + Security  │   │  │
-│  │  :8000       │                  │  │ + Auditor        │   │  │
-│  └──────────────┘                  │  └─────────────────┘   │  │
+│                                    │  ┌─────────────────┐    │  │
+│  ┌──────────────┐                  │  │ Safety Council  │    │  │
+│  │ buggy-app-v2 │◄────────────────►│  │ SRE + Security  │    │  │
+│  │  :8000       │                  │  │ + Auditor       │    │  │
+│  └──────────────┘                  │  └─────────────────┘    │  │
 │                                    │                         │  │
-│  ┌──────────────┐                  │  ┌─────────────────┐   │  │
-│  │  Streamlit   │                  │  │ RAG Runbook      │   │  │
-│  │  :8501       │                  │  │ TF-IDF Vector    │   │  │
-│  └──────────────┘                  │  │ Auto-growing     │   │  │
-│                                    │  └─────────────────┘   │  │
+│  ┌──────────────┐                  │  ┌─────────────────┐    │  │
+│  │  Streamlit   │                  │  │ RAG Runbook     │    │  │
+│  │  :8501       │                  │  │ TF-IDF Vector   │    │  │
+│  └──────────────┘                  │  │ Auto-growing    │    │  │
+│                                    │  └─────────────────┘    │  │
 │                                    └─────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
