@@ -1,1 +1,44 @@
-[]
+[
+  {
+    "incident_id": "E2E-TEST-002",
+    "alert_type": "Memory Leak",
+    "logs": "Memory usage at 94.2%. OOM imminent.",
+    "container_name": "buggy-app-v2",
+    "severity": "CRITICAL",
+    "root_cause": "Memory leak causing OOM condition at 94.2% usage",
+    "action": "RESTART",
+    "justification": "Critical memory leak with imminent OOM requires immediate restart to prevent service disruption",
+    "confidence": 0.95,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T17:11:54.883320"
+  },
+  {
+    "incident_id": "DEMO-MLWKWZVV",
+    "alert_type": "Memory Leak",
+    "logs": "Memory usage at 94.2%. Heap allocation growing. OOM killer imminent. Container DEMO-MLWKWZVV nearing limits.",
+    "container_name": "buggy-app-v2",
+    "severity": "CRITICAL",
+    "root_cause": "Memory leak causing OOM condition at 94.2% usage",
+    "action": "RESTART",
+    "justification": "Critical memory leak with imminent OOM requires immediate restart to prevent service disruption",
+    "confidence": 0.95,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T17:15:08.760146"
+  },
+  {
+    "incident_id": "DEMO-MLWKX1PC",
+    "alert_type": "Memory Leak",
+    "logs": "Memory usage at 94.2%. Heap allocation growing. OOM killer imminent. Container DEMO-MLWKX1PC nearing limits.",
+    "container_name": "buggy-app-v2",
+    "severity": "CRITICAL",
+    "root_cause": "Memory leak causing OOM condition at 94.2% usage",
+    "action": "RESTART",
+    "justification": "Critical memory leak with imminent OOM requires immediate restart to prevent service disruption",
+    "confidence": 0.95,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T17:15:09.801718"
+  }
+]
