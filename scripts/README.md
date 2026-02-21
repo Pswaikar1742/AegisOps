@@ -141,24 +141,27 @@ code aegis_core/app/ai_brain.py
 
 ## Documentation
 
-- **docs/DEMO.md** - Detailed walkthrough with timeline and code references
+- **docs/overview.md** - Full system overview and architecture
 - **docs/repo-overview.md** - Full API reference and architecture
-- **CHANGES.md** - Latest UI/UX improvements
-- **LOCAL_DEV.md** - Local development without Docker rebuilds
+- **docs/getting-started.md** - Setup, testing workflows, debugging
+- **docs/LOCAL_DEV.md** - Local development without Docker rebuilds
 
-## Files Created
+## Files
 
 ```
 scripts/
-├── demo-setup.sh              ← Main orchestrator (run this first!)
-├── trigger-demo-incident.sh   ← Send incidents to trigger AI
-├── demo-quickstart.sh         ← Quick reference card
-└── README.md                  ← This file
+├── README.md                    ← This file
+├── demo-setup.sh                ← Main orchestrator (run this first!)
+├── trigger-demo-incident.sh     ← Send incidents to trigger AI
+├── trigger-all-incidents.sh     ← Trigger all 5 incident types
+├── demo-quickstart.sh           ← Quick reference card
+├── DEMO.sh                      ← One-command demo launcher
+├── DEMO_READY.sh                ← Demo readiness checklist
+└── test-visual-enhancements.sh  ← Visual test suite
 
-Alongside:
-├── docker-compose.demo.yml    ← Extended config with health checks
-├── docs/DEMO.md               ← Detailed demo guide
-└── CHANGES.md                 ← Updated with demo info
+Root:
+├── docker-compose.yml           ← Full stack orchestration
+└── docker-compose.demo.yml      ← Demo-specific compose override
 ```
 
 ## Performance
@@ -194,10 +197,9 @@ After the demo:
 ## Support
 
 For issues or questions:
-1. Check `docs/DEMO.md` detailed walkthrough
-2. Review `docs/repo-overview.md` API reference
-3. Check `CHANGES.md` for recent fixes
-4. Run `docker logs <service>` for debug output
+1. Check `docs/getting-started.md` for setup and debugging
+2. Review `docs/repo-overview.md` for the full API reference
+3. Run `docker logs <service>` for debug output
 
 ---
 
