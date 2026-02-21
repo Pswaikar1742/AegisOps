@@ -29,6 +29,15 @@ ENV/
 env/
 .venv
 .env
+# Byte-compiled / optimised / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
 
 # IDE
 .vscode/
@@ -60,3 +69,10 @@ Thumbs.db
 .env.local
 .env.*.local
 node_modules/
+
+# Environment secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db
