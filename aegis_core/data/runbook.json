@@ -446,5 +446,33 @@
     "council_approved": true,
     "replicas_used": 0,
     "resolved_at": "2026-02-21T19:40:11.363927"
+  },
+  {
+    "incident_id": "INC-MLWS6NS4",
+    "alert_type": "CPU Spike",
+    "logs": "CPU Spike detected. Usage critical. Container INC-MLWS6NS4 nearing limits. Immediate action required.",
+    "container_name": "buggy-app-v2",
+    "severity": "HIGH",
+    "root_cause": "CPU spike causing critical usage levels in buggy-app-v2 container",
+    "action": "SCALE_UP",
+    "justification": "CPU spike requires horizontal scaling to distribute load across multiple replicas, preventing service degradation",
+    "confidence": 0.85,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T20:38:38.510821"
+  },
+  {
+    "incident_id": "DEMO-CPU-1771706428",
+    "alert_type": "CPU Spike",
+    "logs": "Process PID 2847 consuming 85% CPU. Stack trace shows infinite loop in data processor.",
+    "container_name": "unknown",
+    "severity": "high",
+    "root_cause": "Infinite loop in data processor causing CPU spike",
+    "action": "RESTART",
+    "justification": "Stack trace confirms infinite loop in data processor - this is a code logic defect that won't resolve with scaling and requires process restart to break the loop",
+    "confidence": 0.95,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T20:40:47.362098"
   }
 ]

@@ -123,7 +123,7 @@ export default function AIStreamPanel({ messages }) {
             animate={{ opacity: 1 }}
             className="mt-2 p-3 bg-black/80 rounded border-2 border-cyan-500/40 typewriter-stream"
           >
-            {streamText.split('').map((char, i) => (
+            {sanitizeText(streamText).split('').map((char, i) => (
               <span
                 key={i}
                 className="inline-block bright-cyan"
@@ -135,7 +135,7 @@ export default function AIStreamPanel({ messages }) {
                 {char}
               </span>
             ))}
-            <span className="animate-pulse text-cyan-400">▊</span>
+            <span className="ml-1 inline-block animate-pulse text-cyan-400">▊</span>
           </motion.div>
         )}
       </div>
