@@ -2,7 +2,7 @@
 AegisOps – FastAPI entry-point for the Autonomous SRE Agent.
 
 Run with:
-    uvicorn aegis_core.app.main:app --host 0.0.0.0 --port 8080 --reload
+    uvicorn aegis_core.app.main:app --host 0.0.0.0 --port 8001 --reload
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .ai_brain import analyze_logs
@@ -22,6 +23,7 @@ from .models import (
     ResolutionStatus,
 )
 from .verification import append_to_runbook, verify_health
+from .slack_notifier import notify as slack_notify
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -45,6 +47,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── CORS (allow React UI from any origin during dev) ────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ── Background remediation pipeline ─────────────────────────────────
 async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
@@ -65,12 +76,14 @@ async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
         analysis = await analyze_logs(payload)
         result.analysis = analysis
         result.status = ResolutionStatus.EXECUTING
+        await slack_notify(payload, ResolutionStatus.EXECUTING, analysis=analysis)
     except Exception as exc:  # noqa: BLE001
         result.status = ResolutionStatus.FAILED
         result.error = f"LLM call failed – not retrying: {exc}"
         logger.error(
             "🚫 LLM error for incident %s: %s", payload.incident_id, exc,
         )
+        await slack_notify(payload, ResolutionStatus.FAILED, error=result.error)
         return
 
     # ── 2. Execute Action ────────────────────────────────────────────
@@ -98,6 +111,7 @@ async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
             logger.info("Container tail-logs:\n%s", tail)
         except Exception:  # noqa: BLE001
             pass
+        await slack_notify(payload, ResolutionStatus.FAILED, analysis=analysis, error=result.error)
         return
 
     # ── 3. Verify (health-check with retries) ───────────────────────
@@ -108,10 +122,12 @@ async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
         # ── 4. Learn – append to runbook.json ────────────────────────
         await append_to_runbook(payload, analysis)
         logger.info("✅ Incident %s RESOLVED.", payload.incident_id)
+        await slack_notify(payload, ResolutionStatus.RESOLVED, analysis=analysis)
     else:
         result.status = ResolutionStatus.FAILED
         result.error = "Health check failed after restart (all retries exhausted)."
         logger.warning("❌ Incident %s FAILED verification.", payload.incident_id)
+        await slack_notify(payload, ResolutionStatus.FAILED, analysis=analysis, error=result.error)
 
 
 # ── In-memory incident tracker (good enough for hackathon) ───────────
@@ -144,6 +160,11 @@ async def receive_webhook(
     incidents[payload.incident_id] = result
 
     background_tasks.add_task(_remediate, payload, result)
+
+    # Fire Slack notification for new incident
+    background_tasks.add_task(
+        slack_notify, payload, ResolutionStatus.ANALYSING,
+    )
 
     return result
 
