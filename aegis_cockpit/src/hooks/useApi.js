@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:8001'
-  : `http://${window.location.hostname}:8001`;
+/* Use nginx /api/ proxy (avoids CORS) — falls back to direct 8001 only outside Docker */
+const API_BASE = '/api';
 
 export function useApi() {
   const [incidents, setIncidents] = useState([]);
