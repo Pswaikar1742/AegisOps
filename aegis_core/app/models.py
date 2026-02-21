@@ -13,9 +13,17 @@ from pydantic import BaseModel, Field
 
 # ── Incoming webhook from OpenTelemetry Collector ────────────────────
 class IncidentPayload(BaseModel):
+    """Accept alerts from multiple sources (OTel, Dev 2's buggy-app, manual curl)."""
+
+    model_config = {"extra": "allow"}  # tolerate unknown fields
+
     incident_id: str = Field(..., description="Unique alert identifier")
     alert_type: str = Field(..., description="Category, e.g. 'Memory Leak'")
-    logs: str = Field(..., description="Raw log snippet forwarded by the collector")
+    logs: str = Field(default="", description="Raw log snippet forwarded by the collector")
+    # Optional fields sent by Dev 2's buggy-app
+    container_name: Optional[str] = None
+    severity: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 # ── LLM structured response ──────────────────────────────────────────
