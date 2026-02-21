@@ -258,9 +258,9 @@ def _format_rag_context(rag_entries: list[dict]) -> str:
     for i, entry in enumerate(rag_entries, 1):
         lines.append(f"Past Incident #{i} (similarity: {entry['similarity_score']:.1%}):")
         lines.append(f"  Alert Type : {entry['alert_type']}")
-        lines.append(f"  Root Cause : {entry['root_cause']}")
-        lines.append(f"  Action     : {entry['action']}")
-        lines.append(f"  Justification: {entry['justification']}")
+        lines.append(f"  Root Cause: {entry['root_cause']}")
+        lines.append(f"  Action    : {entry['action']}")
+        lines.append(f"  Reasoning : {entry['justification']}")
         if entry.get("replicas_used"):
             lines.append(f"  Replicas   : {entry['replicas_used']}")
         lines.append(f"  Log Snippet: {entry['logs'][:200]}")

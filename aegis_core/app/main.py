@@ -161,7 +161,7 @@ async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
             "incident_id": iid, "analysis": analysis.model_dump(),
         }, incident_id=iid)
         _timeline(result, "AI_COMPLETE",
-                  f"Root cause: {analysis.root_cause} → {analysis.action.value}",
+                  f"Root cause: {analysis.root_cause[:80]} | Action: {analysis.action.value}",
                   "SRE_AGENT")
         await slack_notify(payload, ResolutionStatus.ANALYSING, analysis=analysis)
     except Exception as exc:

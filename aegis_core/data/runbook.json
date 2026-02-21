@@ -320,5 +320,33 @@
     "council_approved": true,
     "replicas_used": 0,
     "resolved_at": "2026-02-21T18:46:14.769163"
+  },
+  {
+    "incident_id": "INC-MLWP57TF",
+    "alert_type": "Memory Leak",
+    "logs": "Memory Leak detected. Usage critical. Container INC-MLWP57TF nearing limits. Immediate action required.",
+    "container_name": "buggy-app-v2",
+    "severity": "HIGH",
+    "root_cause": "Memory leak causing critical usage levels in buggy-app-v2 container",
+    "action": "RESTART",
+    "justification": "Critical memory leak requires immediate restart to prevent OOM kill and service disruption, consistent with past incident #2 resolution",
+    "confidence": 0.9,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T19:13:31.306878"
+  },
+  {
+    "incident_id": "INC-MLWP9Z2L",
+    "alert_type": "OOM Kill",
+    "logs": "OOM Kill detected. Usage critical. Container INC-MLWP9Z2L nearing limits. Immediate action required.",
+    "container_name": "buggy-app-v2",
+    "severity": "CRITICAL",
+    "root_cause": "Out of Memory kill occurred in buggy-app-v2 container",
+    "action": "RESTART",
+    "justification": "OOM kill requires immediate restart to restore service availability, similar to past memory-related incidents",
+    "confidence": 0.9,
+    "council_approved": true,
+    "replicas_used": 0,
+    "resolved_at": "2026-02-21T19:17:12.803767"
   }
 ]

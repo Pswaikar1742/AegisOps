@@ -42,7 +42,7 @@ function extractMsg(type, data) {
         case 'status.update':    return data.message || data.status || '';
         case 'ai.thinking':      return data.message || data.content || '🧠 Thinking…';
         case 'ai.stream':        return data.chunk || data.content || '';
-        case 'ai.complete':      return data.analysis ? `✅ ${sanitizeText(data.analysis.root_cause)} → ${data.analysis.action}` : (data.message || 'Analysis complete');
+        case 'ai.complete':      return data.analysis ? `✅ Analysis: ${sanitizeText(data.analysis.root_cause)} → Executing: ${data.analysis.action}` : (data.message || 'Analysis complete');
         case 'council.vote':     return data.vote ? `${data.vote.role}: ${data.vote.verdict} — ${(data.vote.reasoning||'').slice(0,80)}` : JSON.stringify(data).slice(0,100);
         case 'council.decision': return data.decision ? `${data.decision.final_verdict}: ${data.decision.summary||''}` : JSON.stringify(data).slice(0,100);
         case 'docker.action':    return `🐳 ${data.action} → ${data.container || ''}`;
@@ -194,7 +194,7 @@ export default function Dashboard() {
             case 'ai.complete':
                 /* Backend sends: { analysis: { root_cause, action, ... } } */
                 setCurrentAIText(data?.analysis
-                    ? sanitizeText(`Root Cause: ${data.analysis.root_cause}\nAction: ${data.analysis.action}\nConfidence: ${(Math.max(0, Math.min(1, Number(data.analysis.confidence)||0))*100).toFixed(0)}%\nJustification: ${data.analysis.justification||''}`)
+                    ? sanitizeText(`Root Cause: ${data.analysis.root_cause}\nAction: ${data.analysis.action}\nConfidence: ${(Math.max(0, Math.min(1, Number(data.analysis.confidence)||0))*100).toFixed(0)}%\nReasoning: ${data.analysis.justification||''}`)
                     : (data?.message || 'Analysis complete'));
                 setAiStatus('complete');
                 break;
@@ -304,7 +304,7 @@ export default function Dashboard() {
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     {[
                         { label:'Containers', value: containers.length||'…', icon:'🐳', color:'text-aegis-accent' },
-                        { label:'Active Incidents', value: activeIncidents.length, icon:'🔥', color: activeIncidents.length>0?'text-red-400':'text-green-400' },
+                        { label:'Active Issues', value: activeIncidents.length, icon:'🔥', color: activeIncidents.length>0?'text-red-400':'text-green-400' },
                         { label:'Resolved', value: resolvedCount || incidents.filter(i=>['RESOLVED','resolved'].includes(i.status)).length, icon:'✅', color:'text-green-400' },
                         { label:'Failed', value: failedCount || incidents.filter(i=>['FAILED','failed'].includes(i.status)).length, icon:'💀', color:'text-red-400' },
                         { label:'WS Clients', value: health?.ws_clients||'…', icon:'📡', color:'text-aegis-accent' },
@@ -329,7 +329,7 @@ export default function Dashboard() {
                     ))}
                     {latestMetrics.length > 0 && (
                         <div className="mt-3 space-y-1.5 border-t border-white/5 pt-3">
-                            <span className="text-[10px] font-mono text-gray-600 uppercase tracking-wider">Per Container</span>
+                            <span className="text-[10px] font-mono text-gray-600 uppercase tracking-wider font-semibold">Container Metrics</span>
                             {latestMetrics.map((m,i) => (
                                 <div key={i} className="flex items-center justify-between text-[11px] font-mono py-0.5">
                                     <span className="text-gray-400 truncate max-w-[110px]">{(m.name||'').replace(/aegisops[-_]?/,'')}</span>

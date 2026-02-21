@@ -95,7 +95,7 @@ elif st.session_state.stage == 2:
      st.error(f"🔴 Service: {incident_data['affected_service']} is UNHEALTHY.")
      with st.spinner("🧠 AegisOps AI Agent diagnosing root cause from logs..."):
          time.sleep(3) # Simulate thinking
-     st.info(f"Root cause identified: **{incident_data['root_cause']}**")
+     st.success(f"✅ Root cause analysis: **{incident_data['root_cause']}**")
      
      time.sleep(1)
      st.session_state.stage = 3

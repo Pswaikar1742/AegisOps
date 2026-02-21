@@ -34,8 +34,8 @@ export default function AIStreamPanel({ messages }) {
       if (analysis) {
         setLogs((prev) => [...prev.slice(-50),
           { ts: msg.timestamp, type: 'ROOT_CAUSE', text: sanitizeText(analysis.root_cause), color: 'text-aegis-warn' },
-          { ts: msg.timestamp, type: 'ACTION', text: `${analysis.action} (${(Math.max(0, Math.min(1, Number(analysis.confidence)||0))*100).toFixed(0)}% confident)`, color: 'text-aegis-accent' },
-          { ts: msg.timestamp, type: 'REASON', text: sanitizeText(analysis.justification), color: 'text-gray-400' },
+          { ts: msg.timestamp, type: 'ACTION', text: `${analysis.action} (${(Math.max(0, Math.min(1, Number(analysis.confidence)||0))*100).toFixed(0)}% confidence)`, color: 'text-aegis-accent' },
+          { ts: msg.timestamp, type: 'REASONING', text: sanitizeText(analysis.justification), color: 'text-gray-400' },
         ]);
       }
     } else if (msg.type === 'council.vote') {

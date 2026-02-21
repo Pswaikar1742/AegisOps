@@ -160,8 +160,9 @@ export default function IncidentPanel({ incidents }) {
                         {inc.analysis && (
                           <div className="mt-2 p-2 rounded bg-black/30 text-xs space-y-1">
                             <div><span className="text-gray-500">Root Cause:</span> <span className="text-aegis-warn">{sanitizeText(inc.analysis.root_cause)}</span></div>
-                            <div><span className="text-gray-500">Action:</span> <span className="text-aegis-accent font-mono">{inc.analysis.action}</span></div>
-                            <div><span className="text-gray-500">Confidence:</span> <span className="text-gray-300">{(Math.max(0, Math.min(1, Number(inc.analysis.confidence)||0)) * 100).toFixed(0)}%</span></div>
+                            <div><span className="text-gray-500">Recommended Action:</span> <span className="text-aegis-accent font-mono">{inc.analysis.action}</span></div>
+                            <div><span className="text-gray-500">Confidence Level:</span> <span className="text-gray-300">{(Math.max(0, Math.min(1, Number(inc.analysis.confidence)||0)) * 100).toFixed(0)}%</span></div>
+                            <div><span className="text-gray-500">Reasoning:</span> <span className="text-gray-400">{sanitizeText(inc.analysis.justification)}</span></div>
                           </div>
                         )}
 
