@@ -1,0 +1,5 @@
+{
+  "buildCommand": "cd aegis_cockpit && npm run build",
+  "outputDirectory": "aegis_cockpit/dist",
+  "framework": "vite"
+}
