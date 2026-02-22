@@ -48,3 +48,14 @@ NGINX_CONF_PATH: str = os.getenv("NGINX_CONF_PATH", "/etc/nginx/conf.d/upstream.
 
 # ── Metrics polling ──────────────────────────────────────────────────
 METRICS_INTERVAL_SECS: int = int(os.getenv("METRICS_INTERVAL_SECS", "3"))
+
+# ── Savings baseline (demo/demo-to-production tuning)
+# Map alert_type -> baseline_minutes and cost_per_minute (USD)
+SAVINGS_BASELINE: dict = {
+	"memory_oom":     {"baseline_minutes": 30, "cost_per_min": 10},
+	"cpu_spike":      {"baseline_minutes": 20, "cost_per_min": 8},
+	"db_connection":  {"baseline_minutes": 45, "cost_per_min": 12},
+	"network_latency":{"baseline_minutes": 15, "cost_per_min": 5},
+	"disk_space":     {"baseline_minutes": 60, "cost_per_min": 4},
+	"pod_crash":      {"baseline_minutes": 10, "cost_per_min": 15},
+}

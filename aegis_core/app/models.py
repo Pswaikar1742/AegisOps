@@ -98,6 +98,7 @@ class IncidentResult(BaseModel):
     resolved_at: Optional[str] = None
     error: Optional[str] = None
     replicas_spawned: int = 0
+    money_saved: float = 0.0
     timeline: list[TimelineEntry] = Field(default_factory=list)
 
 
@@ -126,6 +127,7 @@ class WSFrameType(str, Enum):
     CONTAINER_LIST = "container.list"
     TOPOLOGY = "topology"
     RESOLVED = "resolved"
+    INCIDENT_SAVINGS = "incident.savings"
     FAILED = "failed"
     HEARTBEAT = "heartbeat"
 

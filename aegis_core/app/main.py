@@ -33,6 +33,7 @@ from .models import (
 from .verification import append_to_runbook, verify_health
 from .slack_notifier import notify as slack_notify
 from .ws_manager import manager as ws
+from .config import SAVINGS_BASELINE
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -324,6 +325,35 @@ async def _remediate(payload: IncidentPayload, result: IncidentResult) -> None:
         await ws.broadcast_raw(WSFrameType.RESOLVED, data={
             "incident_id": iid, "resolved_at": result.resolved_at,
         }, incident_id=iid)
+        # --- Compute and emit authoritative savings estimate (demo) ---
+        try:
+            # determine received timestamp from timeline or payload
+            received_ts = None
+            for e in result.timeline:
+                if e.status == "RECEIVED":
+                    received_ts = e.ts
+                    break
+            if not received_ts:
+                received_ts = payload.timestamp or result.resolved_at
+            received_dt = _dt.datetime.fromisoformat(received_ts)
+            resolved_dt = _dt.datetime.fromisoformat(result.resolved_at)
+            ttr_minutes = max(0.0, (resolved_dt - received_dt).total_seconds() / 60.0)
+            baseline = SAVINGS_BASELINE.get(result.alert_type, {"baseline_minutes": 20, "cost_per_min": 5})
+            baseline_minutes = float(baseline.get("baseline_minutes", 20))
+            cost_per_min = float(baseline.get("cost_per_min", 5))
+            money_saved = max(0.0, (baseline_minutes - ttr_minutes) * cost_per_min)
+            money_saved = round(money_saved, 2)
+            result.money_saved = money_saved
+            await ws.broadcast_raw(WSFrameType.INCIDENT_SAVINGS, data={
+                "incident_id": iid,
+                "money_saved": money_saved,
+                "baseline_minutes": baseline_minutes,
+                "cost_per_min": cost_per_min,
+                "ttr_minutes": round(ttr_minutes, 2),
+            }, incident_id=iid)
+            logger.info("💰 Incident %s savings emitted: $%s", iid, money_saved)
+        except Exception as exc:
+            logger.debug("Savings calc failed: %s", exc)
         await append_to_runbook(
             payload, analysis,
             council_approved=True,
@@ -473,6 +503,80 @@ async def rag_test(logs: str = "CPU usage at 98% infinite loop"):
         "query": logs,
         "retrieved": results,
         "count": len(results),
+    }
+
+
+@app.get("/savings")
+async def savings_report(top: int = 20):
+    """Return aggregated savings report for resolved incidents.
+
+    - `top` limits number of incidents returned ordered by money_saved desc.
+    """
+    report_items = []
+    total_saved = 0.0
+    resolved_count = 0
+
+    for r in incidents.values():
+        try:
+            money = float(getattr(r, "money_saved", 0.0) or 0.0)
+        except Exception:
+            money = 0.0
+
+        ttr_minutes = None
+        if r.resolved_at:
+            resolved_count += 1
+            # ensure money is computed for older incidents
+            if not money:
+                try:
+                    # find received timestamp in timeline
+                    received_ts = None
+                    for e in r.timeline:
+                        if e.status == "RECEIVED":
+                            received_ts = e.ts
+                            break
+                    if not received_ts:
+                        received_ts = r.timeline[0].ts if r.timeline else None
+                    if received_ts:
+                        received_dt = _dt.datetime.fromisoformat(received_ts)
+                        resolved_dt = _dt.datetime.fromisoformat(r.resolved_at)
+                        ttr_minutes = max(0.0, (resolved_dt - received_dt).total_seconds() / 60.0)
+                        baseline = SAVINGS_BASELINE.get(r.alert_type, {"baseline_minutes": 20, "cost_per_min": 5})
+                        money = max(0.0, (float(baseline.get("baseline_minutes", 20)) - ttr_minutes) * float(baseline.get("cost_per_min", 5)))
+                        money = round(money, 2)
+                        r.money_saved = money
+                except Exception:
+                    money = float(getattr(r, "money_saved", 0.0) or 0.0)
+            total_saved += money
+
+            # compute ttr if not already computed
+            if ttr_minutes is None and r.resolved_at:
+                try:
+                    received_ts = None
+                    for e in r.timeline:
+                        if e.status == "RECEIVED":
+                            received_ts = e.ts
+                            break
+                    if received_ts:
+                        received_dt = _dt.datetime.fromisoformat(received_ts)
+                        resolved_dt = _dt.datetime.fromisoformat(r.resolved_at)
+                        ttr_minutes = round(max(0.0, (resolved_dt - received_dt).total_seconds() / 60.0), 2)
+                except Exception:
+                    ttr_minutes = None
+
+            report_items.append({
+                "incident_id": r.incident_id,
+                "alert_type": r.alert_type,
+                "money_saved": round(money, 2),
+                "resolved_at": r.resolved_at,
+                "ttr_minutes": ttr_minutes,
+            })
+
+    # sort by money_saved desc
+    report_items.sort(key=lambda x: x.get("money_saved", 0.0), reverse=True)
+    return {
+        "total_saved": round(total_saved, 2),
+        "resolved_count": resolved_count,
+        "top": report_items[:top],
     }
 
 

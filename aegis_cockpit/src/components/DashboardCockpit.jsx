@@ -3,6 +3,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useApi } from '../hooks/useApi';
 import { sanitizeText } from '../utils/textSanitize';
 
+
 /* ═══════════════════════════════════════════════════════════
    AEGISOPS GOD MODE COCKPIT v2 — 4-Zone NASA Control Room
    ═══════════════════════════════════════════════════════════ */
@@ -19,12 +20,12 @@ const MetricBar = ({ label, value, unit = '%', max = 100 }) => {
   const textColor = pct > 90 ? 'text-red-400 animate-pulse font-bold' : 'text-slate-300';
 
   return (
-    <div className="mb-4">
-      <div className="flex justify-between text-[10px] uppercase tracking-widest text-slate-500 mb-1">
-        <span>{label}</span>
-        <span className={textColor}>{value}{unit}</span>
+    <div className="mb-3 sm:mb-4">
+      <div className="flex justify-between text-[8px] sm:text-[9px] lg:text-[10px] uppercase tracking-widest text-slate-500 mb-1">
+        <span className="truncate">{label}</span>
+        <span className={`${textColor} shrink-0 ml-2`}>{value}{unit}</span>
       </div>
-      <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
+      <div className="w-full bg-slate-900 h-2 sm:h-2.5 rounded-full overflow-hidden border border-slate-800">
         <div className={`h-full rounded-full transition-all duration-1000 ease-out ${color}`}
           style={{ width: `${pct}%` }} />
       </div>
@@ -32,9 +33,18 @@ const MetricBar = ({ label, value, unit = '%', max = 100 }) => {
   );
 };
 
+// ── SavingsMeter ───────────────────────────────────────────
+const SavingsMeter = ({ total }) => (
+  <div className="flex-1 p-2 sm:p-3 rounded border border-slate-800 bg-gradient-to-r from-amber-900/6 to-emerald-900/6">
+    <div className="text-[8px] sm:text-[9px] uppercase tracking-widest text-slate-500">💰 Est. Savings</div>
+    <div className="text-lg sm:text-xl lg:text-2xl font-extrabold text-amber-300 mt-1">{'$' + total.toFixed(2)}</div>
+    <div className="text-[8px] sm:text-[9px] text-slate-500 mt-1">demo estimate</div>
+  </div>
+);
+
 // ── ReplicaNodes ───────────────────────────────────────────
 const ReplicaNodes = ({ count, confirmed }) => (
-  <div className="flex space-x-2 flex-wrap gap-y-2 items-center">
+  <div className="flex space-x-1 sm:space-x-2 flex-wrap gap-y-1 sm:gap-y-2 items-center">
     {Array.from({ length: 5 }).map((_, i) => {
       const active = i < count;
       const confirmedActive = i < confirmed;
@@ -45,7 +55,7 @@ const ReplicaNodes = ({ count, confirmed }) => (
             role="img"
             aria-label={`Replica ${i + 1} ${active ? 'active' : 'available'}`}
             title={`Replica R${i + 1} — ${active ? (pending ? 'Pending start' : 'Active replica') : 'Available slot'}`}
-            className={`h-9 w-9 rounded flex items-center justify-center border text-[10px] font-mono transition-all duration-700 ${
+            className={`h-7 w-7 sm:h-8 sm:w-8 lg:h-9 lg:w-9 rounded flex items-center justify-center border text-[9px] sm:text-[10px] font-mono transition-all duration-700 ${
               active
                 ? pending
                   ? 'bg-amber-900 border-amber-500 text-amber-300 shadow-[0_0_10px_rgba(250,204,21,0.25)] scale-100'
@@ -54,15 +64,7 @@ const ReplicaNodes = ({ count, confirmed }) => (
             }`}
           >
             R{i + 1}
-            {pending && <span className="ml-1 text-[10px] animate-pulse">⏳</span>}
-          </div>
-
-          {/* visual tooltip on hover */}
-          <div className="pointer-events-none absolute -top-10 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-            <div className="bg-slate-800 text-slate-200 text-[11px] px-2 py-1 rounded shadow-md border border-slate-700 whitespace-nowrap">
-              <strong className="text-[11px]">R{i + 1}</strong>
-              <span className="ml-2 text-slate-400 text-[10px]">— {pending ? 'Pending start' : (active ? 'Active replica (serving traffic)' : 'Available replica slot')}</span>
-            </div>
+            {pending && <span className="ml-0.5 text-[8px] animate-pulse">⏳</span>}
           </div>
         </div>
       );
@@ -70,73 +72,82 @@ const ReplicaNodes = ({ count, confirmed }) => (
   </div>
 );
 
-// ── AgentCard ──────────────────────────────────────────────
-const AgentCard = ({ name, role, status, icon }) => (
-  <div className={`rounded-lg border relative overflow-hidden transition-all duration-500 p-4 flex flex-col justify-center items-center text-center ${
-    status === 'thinking' ? 'border-yellow-500/60 bg-yellow-950/20'
-    : status === 'approved' ? 'border-emerald-500/60 bg-emerald-950/15 shadow-[0_0_18px_rgba(16,185,129,0.15)]'
-    : 'border-slate-800 bg-[#0F141F]'
-  }`}>
-    <span className="text-2xl mb-1">{icon}</span>
-    <span className={`font-bold text-xs ${status === 'approved' ? 'text-emerald-400' : 'text-slate-300'}`}>{name}</span>
-    <span className="text-[9px] text-slate-600 uppercase tracking-wider">{role}</span>
-    {status === 'approved' && <div className="absolute top-1.5 right-2 text-emerald-500 text-xs font-bold">✓</div>}
-    {status === 'thinking' && (
-      <div className="absolute bottom-0 left-0 h-0.5 bg-yellow-500 animate-[growbar_2s_ease-in-out_infinite]" style={{ width: '60%' }} />
-    )}
-  </div>
-);
-
-// ── AI Stream Panel ────────────────────────────────────────
-const AIPanel = ({ text, status }) => (
-  <div className="flex-1 flex flex-col min-h-0">
-    <div className="flex justify-between text-[10px] uppercase tracking-widest text-slate-500 mb-2">
-      <span>Agent Neural Stream</span>
-      <span className={`flex items-center gap-1 ${status === 'streaming' ? 'text-purple-400 animate-pulse' : status === 'complete' ? 'text-emerald-400' : 'text-slate-600'}`}>
-        {status === 'streaming' ? '⚡ ANALYZING' : status === 'complete' ? '✅ DONE' : '● IDLE'}
-      </span>
-    </div>
-    <div className="flex-1 bg-black/60 border border-slate-800 rounded-lg p-4 font-mono text-[11px] overflow-y-auto leading-relaxed text-slate-300 whitespace-pre-wrap min-h-0">
-      {text || <span className="text-slate-700">Waiting for incident… Click an injection button.</span>}
-      <span className="animate-pulse text-emerald-500 ml-0.5">▌</span>
-    </div>
-  </div>
-);
-
-// ── Terminal Log ───────────────────────────────────────────
-const TerminalLog = ({ logs }) => {
-  const ref = useRef(null);
-  useEffect(() => { if (ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [logs]);
-
+// ── AgentCard (Council member status) ───────────────────────
+const AgentCard = ({ name, role, status, icon }) => {
+  const statusColor = 
+    status === 'approved' ? 'from-emerald-900/40 to-emerald-900/20 border-emerald-500/60 text-emerald-300 shadow-emerald-500/20'
+    : status === 'thinking' ? 'from-blue-900/40 to-blue-900/20 border-blue-500/60 text-blue-300 shadow-blue-500/20'
+    : 'from-slate-900/30 to-slate-900/10 border-slate-600/40 text-slate-400 shadow-slate-500/10';
+  const statusDot =
+    status === 'approved' ? '🟢'
+    : status === 'thinking' ? '🟡'
+    : '⚪';
   return (
-    <div ref={ref} className="flex-1 bg-black/50 border border-slate-800 rounded-lg p-3 font-mono text-[10px] overflow-y-auto space-y-1 min-h-0">
-      {logs.length === 0 && <div className="text-slate-700 text-center pt-8">Trigger an incident to begin…</div>}
-      {logs.map((l, i) => (
-        <div key={i} className={`flex gap-2 py-0.5 px-1 rounded ${
-          l.type === 'alert'    ? 'text-red-400 bg-red-950/20 border-l-2 border-red-500 pl-2'
-          : l.type === 'resolve' ? 'text-emerald-400 bg-emerald-950/10 border-l-2 border-emerald-500 pl-2'
-          : l.type === 'action'  ? 'text-yellow-400'
-          : l.type === 'council' ? 'text-yellow-300'
-          : l.type === 'ai'      ? 'text-purple-400'
-          : 'text-slate-500'
-        }`}>
-          <span className="text-slate-700 shrink-0">[{l.ts}]</span>
-          <span>{l.msg}</span>
+    <div className={`bg-gradient-to-br ${statusColor} border rounded-lg p-3 sm:p-4 transition-all shadow-lg hover:shadow-xl transform hover:scale-105 hover:-translate-y-1`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-lg sm:text-xl shrink-0">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[9px] sm:text-[10px] font-bold text-slate-200 truncate">{name}</div>
+          <div className="text-[7px] sm:text-[8px] text-slate-500 truncate">{role}</div>
         </div>
-      ))}
+        <span className="text-lg shrink-0 animate-bounce">{statusDot}</span>
+      </div>
+      <div className="text-[8px] sm:text-[9px] capitalize text-slate-300 font-semibold">{status || 'idle'}</div>
     </div>
   );
 };
 
-/* ═══════════════════════════════════════════════════════════
-   MAIN COMPONENT
-   ═══════════════════════════════════════════════════════════ */
-export default function DashboardCockpit() {
-  const { connected, lastMessage } = useWebSocket(WS_URL);
-  const { containers, triggerScale } = useApi();
+// ── AIPanel (AI Analysis streaming) ───────────────────────────
+const AIPanel = ({ text, status }) => (
+  <div className="bg-gradient-to-br from-slate-900/60 to-slate-900/30 border border-slate-700/50 rounded-lg p-3 sm:p-4 flex flex-col h-auto sm:min-h-28 lg:min-h-40 shadow-lg hover:shadow-xl transition-all card-dark">
+    <div className="flex items-center justify-between mb-2 shrink-0">
+      <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest">🧠 AI Analysis</h2>
+      <span className={`text-[8px] uppercase font-bold px-2 py-1 rounded-full ${
+        status === 'complete' ? 'bg-emerald-900/40 text-emerald-400 text-glow-success' 
+        : status === 'streaming' ? 'bg-blue-900/40 text-blue-400 text-glow animate-pulse' 
+        : 'bg-slate-900/40 text-slate-600'
+      }`}>
+        ●  {status}
+      </span>
+    </div>
+    <div className="flex-1 min-h-24 sm:min-h-32 overflow-y-auto bg-slate-950/60 rounded-lg border border-slate-700/30 p-3 sm:p-4 text-[9px] sm:text-[10px] lg:text-[11px] font-mono text-slate-300 whitespace-pre-wrap break-words terminal-text">
+      {text || '(waiting for incident...)'}
+    </div>
+  </div>
+);
 
-  // ── State ──────────────────────────────────────────────────
-  const [metrics, setMetrics]           = useState({ cpu: 12, memory: 45, db: 20, net: 8 });
+// ── TerminalLog (Event log terminal) ───────────────────────────
+const TerminalLog = ({ logs }) => (
+  <div className="bg-slate-950/80 border border-slate-700/50 rounded-lg font-mono text-[8px] sm:text-[9px] lg:text-[10px] overflow-hidden flex flex-col h-full shadow-lg card-dark">
+    <div className="bg-gradient-to-r from-slate-900/80 to-slate-900/40 px-3 sm:px-4 py-2 border-b border-slate-700/50 text-slate-500 shrink-0 font-semibold">
+      <span className="text-emerald-500">$</span> aegis-event-log
+    </div>
+    <div className="flex-1 overflow-y-auto p-2 sm:p-3 space-y-0.5 sm:space-y-1">
+      {logs.length === 0 ? (
+        <div className="text-slate-600 italic">Waiting for events...</div>
+      ) : (
+        logs.map((log, i) => (
+          <div key={i} className={`flex gap-2 sm:gap-3 terminal-line font-mono ${
+            log.type === 'alert' ? 'text-red-400 font-semibold'
+            : log.type === 'resolve' ? 'text-emerald-400 font-semibold'
+            : log.type === 'council' ? 'text-blue-400'
+            : log.type === 'ai' ? 'text-purple-400'
+            : log.type === 'action' ? 'text-amber-400'
+            : 'text-slate-400'
+          }`}>
+            <span className="text-slate-600 shrink-0">[{log.ts}]</span>
+            <span className="break-words flex-1">{log.msg}</span>
+          </div>
+        ))
+      )}
+    </div>
+  </div>
+);
+
+export default function DashboardCockpit() {
+  const { connected, lastMessage, messages, send } = useWebSocket(WS_URL);
+  const [metrics, setMetrics]           = useState({ cpu: 15, memory: 42, db: 18, net: 7, disk: 12 });
+  const [containers, setContainers]    = useState([]);
   const [replicaCount, setReplicaCount] = useState(1);
   const [confirmedReplicaCount, setConfirmedReplicaCount] = useState(1); // last confirmed by backend
   const [councilStatus, setCouncilStatus] = useState({ sre: 'idle', security: 'idle', auditor: 'idle' });
@@ -144,6 +155,8 @@ export default function DashboardCockpit() {
   const [aiStatus, setAiStatus]         = useState('idle'); // idle | streaming | complete
   const [logs, setLogs]                 = useState([]);
   const [decision, setDecision]         = useState(null);
+  const [cumulativeSavings, setCumulativeSavings] = useState(0.0);
+  const [lastSavedPopup, setLastSavedPopup] = useState({ amt: 0, visible: false });
   const simTimers                       = useRef([]);
   const pendingScaleTimer = useRef(null);
   const pendingScaleTarget = useRef(null);
@@ -153,6 +166,16 @@ export default function DashboardCockpit() {
   const addLog = useCallback((msg, type = 'info') => {
     setLogs(prev => [...prev.slice(-199), { ts: ts(), msg, type }]);
   }, []);
+
+  // Savings baseline table (demo-friendly defaults)
+  const SAVINGS_BASELINE = {
+    memory_oom:    { baseline_minutes: 30, cost_per_min: 10 },
+    cpu_spike:     { baseline_minutes: 20, cost_per_min: 8 },
+    db_connection: { baseline_minutes: 45, cost_per_min: 12 },
+    network_latency:{ baseline_minutes: 15, cost_per_min: 5 },
+    disk_space:    { baseline_minutes: 60, cost_per_min: 4 },
+    pod_crash:     { baseline_minutes: 10, cost_per_min: 15 },
+  };
 
   // ── Real WebSocket handler ─────────────────────────────────
   useEffect(() => {
@@ -234,6 +257,17 @@ export default function DashboardCockpit() {
         setAiStatus('complete');
         break;
 
+      case 'incident.savings': {
+        const money = Number(f.data?.money_saved || 0);
+        if (money > 0) {
+          setCumulativeSavings(prev => Math.round((prev + money) * 100) / 100);
+          setLastSavedPopup({ amt: money, visible: true });
+          setTimeout(() => setLastSavedPopup({ amt: money, visible: false }), 3000);
+          addLog(`💰 Authoritative savings: $${money.toFixed(2)}`, 'action');
+        }
+        break;
+      }
+
       case 'failed':
         addLog(`❌ FAILED: ${f.data?.error || ''}`, 'alert');
         break;
@@ -241,6 +275,18 @@ export default function DashboardCockpit() {
       default: break;
     }
   }, [lastMessage, addLog]);
+
+  // ── Scale trigger (call backend endpoint) ────────────────
+  const triggerScale = async (direction, count = 1) => {
+    try {
+      const endpoint = direction === 'up' ? `/scale/up?count=${count}` : `/scale/down?count=${count}`;
+      const resp = await fetch(endpoint, { method: 'POST' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return await resp.json();
+    } catch (err) {
+      throw new Error(err.message || 'Scale request failed');
+    }
+  };
 
   // ── Fire real webhook + simulation overlay ─────────────────
   const triggerIncident = useCallback(async (alertType, label) => {
@@ -254,6 +300,7 @@ export default function DashboardCockpit() {
     setAiStatus('idle');
 
     addLog(`🚨 INJECT: ${label.toUpperCase()}`, 'alert');
+    const receivedAt = Date.now();
 
     // --- Spike the metric immediately (visual "wow") ---
     if (alertType === 'memory_oom')     setMetrics(m => ({ ...m, memory: 97 }));
@@ -324,6 +371,24 @@ export default function DashboardCockpit() {
       setMetrics({ cpu: 18, memory: 44, db: 19, net: 9 });
       setReplicaCount(prev => prev > 1 ? prev : 1);
       addLog('✅ RESOLVED: Metrics stabilized. Service healthy.', 'resolve');
+      // --- Simulated savings calculation (demo only) ---
+      try {
+        const baseline = SAVINGS_BASELINE[alertType] || { baseline_minutes: 20, cost_per_min: 5 };
+        const resolvedAt = Date.now();
+        const ttrMinutes = Math.max(0, (resolvedAt - receivedAt) / 60000);
+        const moneySaved = Math.max(0, (baseline.baseline_minutes - ttrMinutes) * baseline.cost_per_min);
+        const rounded = Math.round(moneySaved * 100) / 100;
+        if (rounded > 0) {
+          setCumulativeSavings(prev => Math.round((prev + rounded) * 100) / 100);
+          setLastSavedPopup({ amt: rounded, visible: true });
+          setTimeout(() => setLastSavedPopup({ amt: rounded, visible: false }), 3000);
+          addLog(`💰 Estimated savings: $${rounded.toFixed(2)} (baseline ${baseline.baseline_minutes}m)`, 'action');
+        } else {
+          addLog('ℹ️ No measurable savings relative to baseline.', 'action');
+        }
+      } catch (e) {
+        // no-op for demo
+      }
     });
   }, [addLog]);
 
@@ -389,55 +454,72 @@ export default function DashboardCockpit() {
     : 'bg-orange-950/10 border-orange-900/40 hover:bg-orange-950/50 hover:border-orange-500/60 text-orange-400';
 
   return (
-    <div className="h-screen w-full bg-[#0B0F17] text-slate-200 flex font-sans overflow-hidden select-none">
+    <div className="h-screen w-full bg-gradient-to-br from-[#0B0F17] via-[#0D1621] to-[#0A0E16] text-slate-200 flex flex-col lg:flex-row font-sans overflow-hidden select-none">
 
       {/* ── ZONE 1: CHAOS INJECTION PANEL (Left) ── */}
-      <div className="w-56 bg-[#0F141F] border-r border-slate-800 flex flex-col z-10 shrink-0">
-        <div className="p-5 border-b border-slate-800">
-          <h1 className="text-lg font-extrabold tracking-wider text-white">AEGIS<span className="text-emerald-500">OPS</span></h1>
+      <div className="w-full lg:w-60 xl:w-72 bg-gradient-to-b from-[#0F141F] to-[#0A0E16] border-b lg:border-b-0 lg:border-r border-slate-800/50 flex flex-col z-10 shrink-0 max-h-[40vh] lg:max-h-none overflow-y-auto lg:overflow-y-auto">
+        <div className="p-3 sm:p-4 lg:p-5 border-b border-slate-800/50 relative bg-gradient-to-r from-slate-900/50 to-transparent">
+          <h1 className="text-base sm:text-lg lg:text-lg font-extrabold tracking-wider text-white text-glow">AEGIS<span className="text-emerald-500">OPS</span></h1>
           <div className="flex items-center mt-2 gap-2">
             <span className="relative flex h-2 w-2">
               <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'} opacity-75`} />
               <span className={`relative inline-flex rounded-full h-2 w-2 ${connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
             </span>
-            <span className={`text-[9px] uppercase tracking-widest ${connected ? 'text-emerald-500' : 'text-red-500'}`}>{connected ? 'ONLINE' : 'OFFLINE'}</span>
+            <span className={`text-[8px] sm:text-[9px] uppercase tracking-widest font-semibold ${connected ? 'text-emerald-500 text-glow-success' : 'text-red-500 text-glow-danger'}`}>{connected ? '● ONLINE' : '● OFFLINE'}</span>
           </div>
+          {lastSavedPopup.visible && (
+            <div className="absolute top-3 right-2 bg-gradient-to-r from-amber-900 to-amber-800 text-amber-100 px-3 py-1.5 rounded-lg shadow-lg text-[11px] sm:text-[12px] font-bold border border-amber-500/40 text-glow-warning">
+              {'+$' + lastSavedPopup.amt.toFixed(2)}
+            </div>
+          )}
         </div>
 
-        <div className="p-4 flex-1 flex flex-col gap-4 overflow-y-auto">
-          <h2 className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">🎯 Chaos Injection</h2>
-          <div className="space-y-2">
-            {INJECT_BUTTONS.map(b => (
-              <button key={b.type}
-                onClick={() => triggerIncident(b.type, b.label)}
-                className={`group w-full text-left px-3 py-2.5 border rounded transition-all flex items-center gap-3 text-[11px] font-medium cursor-pointer ${btnCls(b.color)}`}>
-                <span className="text-base group-hover:scale-125 transition-transform">{b.icon}</span>
-                {b.label}
-              </button>
-            ))}
+        <div className="p-3 sm:p-4 lg:p-4 flex-1 flex flex-col gap-3 lg:gap-4">
+          <div className="metric-card p-3 sm:p-4">
+            <div className="text-[8px] sm:text-[9px] uppercase tracking-widest text-slate-500 font-semibold">💰 Est. Savings</div>
+            <div className="metric-value mt-2">${cumulativeSavings.toFixed(2)}</div>
+            <div className="text-[8px] sm:text-[9px] text-slate-600 mt-2">Demo estimate</div>
+          </div>
+          
+          <div className="pt-2 border-t border-slate-800/30">
+            <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">🎯 Chaos Injection</h2>
+            <div className="space-y-1.5 sm:space-y-2">
+              {INJECT_BUTTONS.map(b => (
+                <button key={b.type}
+                  onClick={() => triggerIncident(b.type, b.label)}
+                  className={`group w-full text-left px-2 sm:px-3 py-2 sm:py-2.5 border rounded-lg transition-all flex items-center gap-2 sm:gap-3 text-[10px] sm:text-[11px] font-medium cursor-pointer btn-glow backdrop-blur-sm ${
+                    b.color === 'red'
+                      ? 'bg-red-950/20 border-red-900/50 hover:bg-red-950/40 hover:border-red-500/60 text-red-400 hover:shadow-lg hover:shadow-red-500/20'
+                      : 'bg-orange-950/20 border-orange-900/50 hover:bg-orange-950/40 hover:border-orange-500/60 text-orange-400 hover:shadow-lg hover:shadow-orange-500/20'
+                  }`}>
+                  <span className="text-sm sm:text-base group-hover:scale-125 transition-transform shrink-0">{b.icon}</span>
+                  <span className="truncate font-semibold">{b.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Scale controls */}
-          <div className="mt-auto pt-4 border-t border-slate-800 space-y-2">
-            <h2 className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">⚙️ Replicas</h2>
+          <div className="mt-3 lg:mt-auto pt-3 sm:pt-4 lg:pt-4 border-t border-slate-800/30 space-y-2">
+            <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest">⚙️ Replicas</h2>
             <button onClick={() => { triggerScale('up', 2); setReplicaCount(c => Math.min(5, c + 2)); }}
-              className="w-full px-3 py-2 bg-emerald-950/20 border border-emerald-900/40 hover:bg-emerald-950/50 text-emerald-400 rounded text-[10px] font-mono cursor-pointer">
+              className="w-full btn-primary btn-glow px-2 sm:px-3 py-2 rounded-lg text-[9px] sm:text-[10px] font-semibold hover:shadow-emerald-500/50">
               ▲ SCALE UP
             </button>
             <button onClick={() => { triggerScale('down'); setReplicaCount(c => Math.max(1, c - 1)); }}
-              className="w-full px-3 py-2 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-500 rounded text-[10px] font-mono cursor-pointer">
+              className="w-full px-2 sm:px-3 py-2 bg-slate-900/40 border border-slate-700/50 hover:border-slate-600 text-slate-400 rounded-lg text-[9px] sm:text-[10px] font-semibold cursor-pointer transition-all hover:bg-slate-800/40">
               ▼ SCALE DOWN
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── ZONE 2: TELEMETRY & TOPOLOGY (Center-Left) ── */}
-      <div className="w-72 bg-[#0B0F17] border-r border-slate-800 p-5 flex flex-col gap-6 overflow-y-auto shrink-0">
+      {/* ── ZONE 2: TELEMETRY & TOPOLOGY (Center) ── */}
+      <div className="w-full lg:w-60 xl:w-80 bg-gradient-to-b from-[#0B0F17] to-[#0A0E16] border-b lg:border-b-0 lg:border-r border-slate-800/50 p-3 sm:p-4 lg:p-5 flex flex-col gap-4 lg:gap-6 overflow-y-auto shrink-0 max-h-[30vh] lg:max-h-none zone-divider">
 
         {/* Live Telemetry */}
-        <div>
-          <h2 className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-4">📡 Live Telemetry</h2>
+        <div className="metric-card p-4 sm:p-5 rounded-lg">
+          <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-4">📡 Live Telemetry</h2>
           <MetricBar label="CPU Usage"     value={metrics.cpu}    unit="%" />
           <MetricBar label="Memory RSS"    value={metrics.memory} unit="%" />
           <MetricBar label="DB Latency"    value={metrics.db}     unit="ms" max={100} />
@@ -445,55 +527,58 @@ export default function DashboardCockpit() {
         </div>
 
         {/* Infrastructure Topology */}
-        <div>
-          <h2 className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-3">🗺️ Infrastructure</h2>
-          <div className="border border-slate-800 rounded-lg p-4 bg-[#0F141F] space-y-3">
+        <div className="hidden sm:block">
+          <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3">🗺️ Infrastructure</h2>
+          <div className="card-dark rounded-lg p-4 space-y-3 border border-slate-800/50">
             {/* Topology nodes */}
-            <div className="flex flex-col items-center space-y-2 text-[10px]">
-              <div className="px-3 py-1 rounded border border-blue-500/50 bg-blue-900/20 text-blue-400">🌐 Internet</div>
-              <div className="h-4 w-px bg-slate-700" />
-              <div className="px-3 py-1 rounded border border-purple-500/50 bg-purple-900/20 text-purple-400">⚖️ NGINX LB</div>
-              <div className="h-4 w-px bg-slate-700" />
+            <div className="flex flex-col items-center space-y-2 text-[9px] sm:text-[10px]">
+              <div className="px-3 py-1.5 rounded-lg border border-blue-500/50 bg-blue-900/20 text-blue-400 font-semibold">🌐 Internet</div>
+              <div className="h-4 w-px bg-gradient-to-b from-slate-700 to-transparent" />
+              <div className="px-3 py-1.5 rounded-lg border border-purple-500/50 bg-purple-900/20 text-purple-400 font-semibold">⚖️ NGINX LB</div>
+              <div className="h-4 w-px bg-gradient-to-b from-slate-700 to-transparent" />
               <div className="w-full">
-                <div className="flex justify-between text-[9px] text-slate-600 mb-2 uppercase">
+                <div className="flex justify-between text-[8px] sm:text-[9px] text-slate-600 mb-3 uppercase font-semibold">
                   <span>App Replicas</span>
-                  <span className={replicaCount > 1 ? 'text-emerald-400 font-bold' : 'text-slate-600'}>{replicaCount}/5</span>
+                  <span className={replicaCount > 1 ? 'text-emerald-400 text-glow-success' : 'text-slate-600'}>{replicaCount}/5</span>
                 </div>
                 <ReplicaNodes count={replicaCount} />
 
-                <div className="mt-3 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-1 flex-wrap">
                   <button onClick={() => handleScaleUp(1)}
-                    className="px-2 py-1 bg-emerald-800/20 border border-emerald-700 text-emerald-300 text-[11px] rounded hover:bg-emerald-800/40">
+                    className="px-2 py-1 bg-emerald-800/30 border border-emerald-700/50 text-emerald-300 text-[9px] sm:text-[10px] rounded-md hover:bg-emerald-800/50 hover:border-emerald-500 transition-all font-semibold">
                     +1
                   </button>
                   <button onClick={() => handleScaleUp(2)}
-                    className="px-2 py-1 bg-emerald-800/10 border border-emerald-700 text-emerald-300 text-[11px] rounded hover:bg-emerald-800/30">
+                    className="px-2 py-1 bg-emerald-800/20 border border-emerald-700/50 text-emerald-300 text-[9px] sm:text-[10px] rounded-md hover:bg-emerald-800/40 hover:border-emerald-500 transition-all font-semibold">
                     +2
                   </button>
                   <button onClick={() => handleScaleDown(1)}
-                    className="px-2 py-1 bg-slate-900 border border-slate-700 text-slate-400 text-[11px] rounded hover:bg-slate-800">
+                    className="px-2 py-1 bg-slate-900/40 border border-slate-700/50 text-slate-400 text-[9px] sm:text-[10px] rounded-md hover:bg-slate-800/50 hover:border-slate-600 transition-all">
                     -1
                   </button>
                   <button onClick={() => handleScaleDown(2)}
-                    className="px-2 py-1 bg-slate-900 border border-slate-700 text-slate-400 text-[11px] rounded hover:bg-slate-800">
+                    className="px-2 py-1 bg-slate-900/40 border border-slate-700/50 text-slate-400 text-[9px] sm:text-[10px] rounded-md hover:bg-slate-800/50 hover:border-slate-600 transition-all">
                     -2
                   </button>
-                  <span className="ml-auto text-[11px] text-slate-500">Slots: 5</span>
+                  <span className="text-[8px] sm:text-[9px] text-slate-500 ml-auto font-mono">Slots: 5</span>
                 </div>
               </div>
             </div>
 
             {/* Container health */}
-            <div className="pt-2 border-t border-slate-800/60 space-y-1">
+            <div className="pt-3 border-t border-slate-800/50 space-y-1.5">
+              <div className="text-[8px] font-semibold text-slate-500 uppercase mb-2">Container Status</div>
               {(containers.length ? containers : [
                 { name: 'aegis-agent', status: 'running' },
                 { name: 'aegis-cockpit', status: 'running' },
                 { name: 'buggy-app-v2', status: 'running' },
+                { name: 'aegis-lb', status: 'running' },
+                { name: 'aegis-dashboard', status: 'running' },
               ]).slice(0, 5).map((c, i) => (
-                <div key={i} className="flex items-center gap-2 text-[9px]">
-                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.status === 'running' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  <span className="text-slate-500 truncate">{c.name}</span>
-                  <span className={`ml-auto ${c.status === 'running' ? 'text-emerald-600' : 'text-red-500'}`}>{c.status}</span>
+                <div key={i} className="flex items-center gap-2 text-[8px] sm:text-[9px] terminal-line hover:bg-slate-800/20">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${c.status === 'running' ? 'bg-emerald-500' : 'bg-red-500'} animate-pulse`} />
+                  <span className="text-slate-400 truncate font-mono">{c.name}</span>
+                  <span className={`ml-auto font-semibold ${c.status === 'running' ? 'text-emerald-400 text-glow-success' : 'text-red-400 text-glow-danger'}`}>{c.status}</span>
                 </div>
               ))}
             </div>
@@ -502,23 +587,23 @@ export default function DashboardCockpit() {
       </div>
 
       {/* ── ZONE 3 & 4: COUNCIL + AI BRAIN + TERMINAL (Right) ── */}
-      <div className="flex-1 flex flex-col p-5 gap-4 min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col p-3 sm:p-4 lg:p-5 gap-3 lg:gap-4 min-w-0 overflow-y-auto">
 
         {/* Multi-Agent Council */}
-        <div>
-          <h2 className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-3">
-            🗳️ Multi-Agent Governance Council
+        <div className="card-dark p-4 sm:p-5 rounded-lg border border-slate-800/50">
+          <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center justify-between">
+            <span>🗳️ Multi-Agent Governance Council</span>
             {decision && (
-              <span className={`ml-3 px-2 py-0.5 rounded text-[9px] font-bold ${
+              <span className={`ml-2 lg:ml-3 px-3 py-1 rounded-full text-[8px] sm:text-[9px] font-bold inline-block ${
                 decision.final_verdict === 'APPROVED'
-                  ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700/40'
-                  : 'bg-red-900/40 text-red-400 border border-red-700/40'
+                  ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-500/40 text-glow-success'
+                  : 'bg-red-900/40 text-red-400 border border-red-500/40 text-glow-danger'
               }`}>
-                {decision.final_verdict === 'APPROVED' ? '✓ CONSENSUS APPROVED' : '✗ REJECTED'}
+                {decision.final_verdict === 'APPROVED' ? '✓ APPROVED' : '✗ REJECTED'}
               </span>
             )}
           </h2>
-          <div className="grid grid-cols-3 gap-3 h-28">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3">
             <AgentCard name="SRE Lead"   role="Diagnosis"    status={councilStatus.sre}      icon="🧠" />
             <AgentCard name="SecOps"     role="Safety Check" status={councilStatus.security}  icon="🛡️" />
             <AgentCard name="Auditor"    role="Compliance"   status={councilStatus.auditor}   icon="📝" />
@@ -526,14 +611,16 @@ export default function DashboardCockpit() {
         </div>
 
         {/* AI Brain Analysis */}
-        <AIPanel text={aiText} status={aiStatus} />
+        <div className="min-h-28 lg:min-h-40">
+          <AIPanel text={aiText} status={aiStatus} />
+        </div>
 
         {/* Event Log */}
-        <div className="h-44 flex flex-col shrink-0">
-          <h2 className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-2 flex justify-between">
-            <span>Event Log</span>
+        <div className="flex-1 flex flex-col min-h-32 lg:min-h-44">
+          <h2 className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex justify-between shrink-0">
+            <span>📋 Event Log</span>
             {logs.length > 0 && (
-              <button onClick={() => setLogs([])} className="text-slate-700 hover:text-slate-500 text-[9px] cursor-pointer">clear</button>
+              <button onClick={() => setLogs([])} className="text-slate-500 hover:text-slate-300 text-[8px] sm:text-[9px] cursor-pointer transition-colors">clear</button>
             )}
           </h2>
           <TerminalLog logs={logs} />
